@@ -1,0 +1,6 @@
+{
+  "name": "Family Lineage Builder",
+  "description": "An interactive, visual platform to chart and index family history, lineages, and stories.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
