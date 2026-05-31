@@ -24,6 +24,7 @@ export interface MediaAttachment {
 
 export interface ProposedSuggestion {
   id: string;
+  treeId?: string;
   type: 'add_member' | 'edit_member' | 'add_event' | 'add_media';
   status: 'pending' | 'approved' | 'rejected';
   author: string;
@@ -38,9 +39,56 @@ export interface ProposedSuggestion {
 }
 
 export interface CollaborationSession {
-  currentUser: string; // 'Owner' or name of guest (e.g. 'Cousin Sarah')
-  role: 'owner' | 'editor' | 'guest_contributor'; // guest_contributor can only suggest changes
-  allowedBranchId?: string; // Specific branch root member ID, rest inherits view-only or no access
+  currentUser: string;
+  role: 'owner' | 'editor' | 'contributor' | 'viewer';
+  allowedBranchId?: string;
+}
+
+export type CollaborationRole = 'viewer' | 'contributor' | 'editor';
+
+export interface AccessibleTree {
+  treeId: string;
+  name: string;
+  ownerId: string;
+  ownerName: string;
+  role: CollaborationRole | 'owner';
+  members: FamilyMember[];
+  isOwnTree: boolean;
+}
+
+export interface MemberLink {
+  id: string;
+  treeAId: string;
+  memberAId: string;
+  treeBId: string;
+  memberBId: string;
+  status: 'pending' | 'accepted' | 'rejected';
+  createdBy: string;
+}
+
+export interface TreeInvite {
+  id: string;
+  treeId: string;
+  treeName: string;
+  inviteeEmail: string;
+  role: CollaborationRole;
+  token: string;
+  status: 'pending' | 'accepted' | 'declined' | 'revoked';
+  invitedByName: string;
+  createdAt: string;
+}
+
+export interface MergedMemberSource {
+  treeId: string;
+  treeName: string;
+  memberId: string;
+  role: CollaborationRole | 'owner';
+}
+
+export interface VirtualMember extends FamilyMember {
+  virtualId: string;
+  sources: MergedMemberSource[];
+  isEditable: boolean;
 }
 
 export type HeritageSide = 'maternal' | 'paternal' | 'neutral';

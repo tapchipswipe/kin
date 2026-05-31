@@ -24,6 +24,7 @@ export function useLineageStore(userId: string | undefined) {
   const [geocodeCache, setGeocodeCache] = useState<Record<string, { lat: number; lng: number }>>({});
   const [anchorMemberId, setAnchorMemberId] = useState<string | null>(null);
   const [heritageMode, setHeritageMode] = useState(false);
+  const [seniorMode, setSeniorMode] = useState(true);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
   const [loadError, setLoadError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
@@ -43,6 +44,7 @@ export function useLineageStore(userId: string | undefined) {
       setGeocodeCache({});
       setAnchorMemberId(null);
       setHeritageMode(false);
+      setSeniorMode(true);
       setSaveStatus('idle');
       return;
     }
@@ -61,6 +63,7 @@ export function useLineageStore(userId: string | undefined) {
         setGeocodeCache(data.geocodeCache);
         setAnchorMemberId(data.anchorMemberId);
         setHeritageMode(data.heritageMode);
+        setSeniorMode(data.seniorMode);
         const initialFocus =
           data.anchorMemberId && data.members.some((m) => m.id === data.anchorMemberId)
             ? data.anchorMemberId
@@ -125,6 +128,7 @@ export function useLineageStore(userId: string | undefined) {
       geocodeCache?: Record<string, { lat: number; lng: number }>;
       anchorMemberId?: string | null;
       heritageMode?: boolean;
+      seniorMode?: boolean;
     }) => {
       if (!userId || skipPrefsSave.current) {
         skipPrefsSave.current = false;
@@ -189,6 +193,14 @@ export function useLineageStore(userId: string | undefined) {
     [schedulePrefsSave]
   );
 
+  const updateSeniorMode = useCallback(
+    (enabled: boolean) => {
+      setSeniorMode(enabled);
+      schedulePrefsSave({ seniorMode: enabled });
+    },
+    [schedulePrefsSave]
+  );
+
   const clearTree = useCallback(async () => {
     if (!treeId) return;
     await clearAllMembers(treeId);
@@ -214,6 +226,8 @@ export function useLineageStore(userId: string | undefined) {
     updateAnchorMemberId,
     heritageMode,
     updateHeritageMode,
+    seniorMode,
+    updateSeniorMode,
     saveStatus,
     loadError,
     clearTree,

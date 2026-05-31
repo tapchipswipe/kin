@@ -6,7 +6,7 @@
 import { FamilyMember } from '../types';
 import { supabase } from './supabase';
 
-export type TreeLayout = 'hierarchical' | 'radial' | 'grid' | 'dualRoots';
+export type TreeLayout = 'hierarchical' | 'radial' | 'grid' | 'dualRoots' | 'mergedRoots';
 
 function getSupabaseErrorMessage(error: unknown): string {
   if (error && typeof error === 'object' && 'message' in error) {
@@ -46,6 +46,7 @@ export interface LineageData {
   geocodeCache: Record<string, { lat: number; lng: number }>;
   anchorMemberId: string | null;
   heritageMode: boolean;
+  seniorMode: boolean;
 }
 
 export async function loadLineageData(userId: string): Promise<LineageData> {
@@ -103,7 +104,7 @@ export async function loadLineageData(userId: string): Promise<LineageData> {
   }
 
   const layout = prefs.blueprint_layout as TreeLayout;
-  const validLayouts: TreeLayout[] = ['hierarchical', 'radial', 'grid', 'dualRoots'];
+  const validLayouts: TreeLayout[] = ['hierarchical', 'radial', 'grid', 'dualRoots', 'mergedRoots'];
 
   return {
     treeId,
@@ -113,6 +114,7 @@ export async function loadLineageData(userId: string): Promise<LineageData> {
     geocodeCache: (prefs.geocode_cache as Record<string, { lat: number; lng: number }>) ?? {},
     anchorMemberId: prefs.anchor_member_id ?? null,
     heritageMode: prefs.heritage_mode ?? false,
+    seniorMode: prefs.senior_mode ?? true,
   };
 }
 
@@ -166,6 +168,7 @@ export async function savePreferences(
     geocodeCache?: Record<string, { lat: number; lng: number }>;
     anchorMemberId?: string | null;
     heritageMode?: boolean;
+    seniorMode?: boolean;
   }
 ): Promise<void> {
   const update: Record<string, unknown> = {};
@@ -183,6 +186,9 @@ export async function savePreferences(
   }
   if (prefs.heritageMode !== undefined) {
     update.heritage_mode = prefs.heritageMode;
+  }
+  if (prefs.seniorMode !== undefined) {
+    update.senior_mode = prefs.seniorMode;
   }
 
   const { error } = await supabase

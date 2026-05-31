@@ -156,7 +156,7 @@ export const LineageTimeline: React.FC<LineageTimelineProps> = ({
       <div className="bg-[#FAF9F6] p-6 rounded-xl border border-[#E5E1DA] flex flex-wrap gap-4 justify-between items-center">
         <div>
           <h2 className="text-xl font-serif font-bold text-[#2D2926] flex items-center gap-2">
-            <History className="w-5 h-5 text-[#2D2926]" /> Master Family Chronicle
+            <History className="w-5 h-5 text-[#2D2926]" /> Family timeline
           </h2>
           <p className="text-xs text-[#7A7570] mt-1">
             Explore a singular historic timeline of milestones, arrivals, and passings compiled from the entire family index.

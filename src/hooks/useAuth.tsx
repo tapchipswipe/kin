@@ -3,9 +3,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { useContext, useEffect, useState } from 'react';
 import type { Session, User } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
+import { plainAuthError } from '../lib/authErrors';
 
 interface AuthContextValue {
   session: Session | null;
@@ -40,12 +41,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signIn = async (email: string, password: string) => {
     const { error } = await supabase.auth.signInWithPassword({ email, password });
-    return { error: error?.message ?? null };
+    return { error: error ? plainAuthError(error.message) : null };
   };
 
   const signUp = async (email: string, password: string) => {
     const { error } = await supabase.auth.signUp({ email, password });
-    return { error: error?.message ?? null };
+    return { error: error ? plainAuthError(error.message) : null };
   };
 
   const signOut = async () => {
@@ -56,7 +57,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
       redirectTo: `${window.location.origin}`,
     });
-    return { error: error?.message ?? null };
+    return { error: error ? plainAuthError(error.message) : null };
   };
 
   return (

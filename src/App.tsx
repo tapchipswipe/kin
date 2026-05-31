@@ -9,16 +9,20 @@ import { TreeCanvas } from './components/TreeCanvas';
 import { MemberIndex } from './components/MemberIndex';
 import { LineageTimeline } from './components/LineageTimeline';
 import { MemberForm } from './components/MemberForm';
+import { SimpleMemberForm } from './components/SimpleMemberForm';
 import { MediaGallery } from './components/MediaGallery';
 import { RecentlyVisited } from './components/RecentlyVisited';
 import { LineageStats } from './components/LineageStats';
 import { LineageMap } from './components/LineageMap';
 import { AuthScreen } from './components/AuthScreen';
 import { OnboardingWizard } from './components/OnboardingWizard';
+import { CollaborationHub } from './components/CollaborationHub';
 import { useAuth } from './hooks/useAuth';
 import { useLineageStore } from './hooks/useLineageStore';
+import { useCollaborationStore } from './hooks/useCollaborationStore';
 import { useAppDialog } from './hooks/useAppDialog';
 import { removeMemberCleanly, findSiblings, getEraLabel } from './utils';
+import { shareBranchWithFamily } from './lib/shareBranch';
 import {
   Network,
   Users,
@@ -37,6 +41,9 @@ import {
   Loader2,
   Cloud,
   CloudOff,
+  Share2,
+  Type,
+  GitBranch,
 } from 'lucide-react';
 import { motion } from 'motion/react';
 
@@ -59,13 +66,25 @@ export default function App() {
     updateAnchorMemberId,
     heritageMode,
     updateHeritageMode,
+    seniorMode,
+    updateSeniorMode,
     saveStatus,
     loadError,
     clearTree,
     retryLoad,
   } = useLineageStore(user?.id);
 
-  const [activeTab, setActiveTab] = useState<'tree' | 'index' | 'timeline' | 'analytics' | 'map'>('tree');
+  const collaboration = useCollaborationStore(
+    user?.id,
+    treeId,
+    members,
+    anchorMemberId,
+    user?.email
+  );
+
+  const [activeTab, setActiveTab] = useState<
+    'tree' | 'index' | 'timeline' | 'analytics' | 'map' | 'collaboration'
+  >('tree');
   const [showForm, setShowForm] = useState(false);
   const [editMemberId, setEditMemberId] = useState<string | null>(null);
   const [prefillRelation, setPrefillRelation] = useState<{
@@ -77,6 +96,7 @@ export default function App() {
     label?: string;
   } | null>(null);
   const [markAsAnchor, setMarkAsAnchor] = useState(false);
+  const [useSimpleForm, setUseSimpleForm] = useState(true);
 
   const onboardingKey = user ? `kin_onboarding_dismissed_${user.id}` : '';
   const [onboardingDismissed, setOnboardingDismissed] = useState(false);
@@ -222,6 +242,7 @@ export default function App() {
     setPrefillRelation(null);
     setPrefillHeritage(null);
     setMarkAsAnchor(options?.asAnchor ?? false);
+    setUseSimpleForm(seniorMode);
     setShowForm(true);
   };
 
@@ -230,6 +251,7 @@ export default function App() {
     setPrefillRelation(null);
     setPrefillHeritage(null);
     setMarkAsAnchor(false);
+    setUseSimpleForm(false);
     setShowForm(true);
   };
 
@@ -242,7 +264,22 @@ export default function App() {
     setPrefillRelation({ memberId, type });
     setPrefillHeritage(heritage ?? null);
     setMarkAsAnchor(false);
+    setUseSimpleForm(seniorMode);
     setShowForm(true);
+  };
+
+  const handleShareBranch = async () => {
+    if (members.length === 0) {
+      toast('Add at least one person before sharing.', 'info');
+      return;
+    }
+    try {
+      const result = await shareBranchWithFamily(members, user?.email);
+      if (result === 'shared') toast('Your family branch was shared.', 'success');
+      else if (result === 'downloaded') toast('File downloaded — attach it to your email.', 'success');
+    } catch {
+      toast('Could not share. Try Export Tree instead.', 'error');
+    }
   };
 
   const handleExportJSON = () => {
@@ -262,6 +299,17 @@ export default function App() {
     }
   };
 
+  const handleImportMembers = (parsed: FamilyMember[]) => {
+    if (Array.isArray(parsed) && parsed.length > 0 && parsed[0].id) {
+      setMembers(synchronizeAllRelationships(parsed));
+      setFocusId(parsed[0].id);
+      toast(`Successfully imported ${parsed.length} family records.`, 'success');
+      dismissOnboarding();
+    } else {
+      toast('Invalid file format. Ensure it is a valid list of family member records.', 'error');
+    }
+  };
+
   const handleImportJSON = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -270,14 +318,7 @@ export default function App() {
     reader.onload = (event) => {
       try {
         const parsed = JSON.parse(event.target?.result as string);
-        if (Array.isArray(parsed) && parsed.length > 0 && parsed[0].id) {
-          setMembers(synchronizeAllRelationships(parsed));
-          setFocusId(parsed[0].id);
-          toast(`Successfully imported ${parsed.length} family records.`, 'success');
-          dismissOnboarding();
-        } else {
-          toast('Invalid file format. Ensure it is a valid list of family member records.', 'error');
-        }
+        handleImportMembers(parsed);
       } catch (err) {
         console.error('Import process crash:', err);
         toast('Could not parse JSON structure.', 'error');
@@ -368,9 +409,30 @@ export default function App() {
     return '';
   };
 
+  const allTabs = [
+    ['tree', Network, 'Family tree'],
+    ['index', Users, 'People list'],
+    ['timeline', History, 'Family timeline'],
+    ['collaboration', GitBranch, 'Collaboration'],
+    ['analytics', PieChart, 'Statistics'],
+    ['map', Globe, 'Family map'],
+  ] as const;
+
+  const visibleTabs = seniorMode
+    ? allTabs.filter(([tab]) => tab === 'tree' || tab === 'index' || tab === 'timeline' || tab === 'collaboration')
+    : allTabs;
+
+  const isCollaborationTab = activeTab === 'collaboration';
+
   return (
-    <div className="min-h-screen bg-[#FDFCFB] text-[#2D2926] flex flex-col font-sans">
-      <header className="bg-white/80 backdrop-blur-md text-[#2D2926] border-b border-[#E5E1DA] sticky top-0 z-40 select-none animate-fadeIn print:hidden">
+    <div
+      className="min-h-screen bg-[#FDFCFB] text-[#2D2926] flex flex-col font-sans"
+      data-senior-mode={seniorMode ? 'true' : 'false'}
+    >
+      <a href="#main-content" className="skip-link">
+        Skip to main content
+      </a>
+      <header className="bg-white/80 backdrop-blur-md text-[#2D2926] border-b border-[#E5E1DA] sticky top-0 z-40 animate-fadeIn print:hidden">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 py-4 flex flex-col sm:flex-row justify-between items-center gap-4">
           <div className="flex items-center gap-3">
             <span className="w-8 h-8 rounded-full bg-[#2D2926] flex items-center justify-center shrink-0">
@@ -381,7 +443,7 @@ export default function App() {
                 Kith & Kin
               </h1>
               <p className="text-[10px] text-[#7A7570] font-medium font-mono uppercase tracking-wider">
-                Lineage Registry Archive
+                {seniorMode ? 'Your family tree' : 'Family archive'}
               </p>
               {user.email && (
                 <p className="text-[10px] text-[#A8A29E] truncate max-w-[180px]" title={user.email}>
@@ -392,75 +454,113 @@ export default function App() {
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
+            <button
+              onClick={() => updateSeniorMode(!seniorMode)}
+              title="Larger text and buttons for easier reading"
+              aria-pressed={seniorMode}
+              className={`px-3.5 py-2 border font-semibold rounded-lg text-sm flex items-center gap-1.5 transition-colors cursor-pointer min-h-[44px] ${
+                seniorMode
+                  ? 'bg-emerald-50 border-emerald-300 text-emerald-800'
+                  : 'bg-[#FAF9F6] border-[#E5E1DA] text-[#2D2926] hover:bg-[#F5F2EF]'
+              }`}
+            >
+              <Type className="w-4 h-4 shrink-0" />
+              Easier to read
+            </button>
+
+            <button
+              onClick={() => handleCreateNewMemberRequest()}
+              className="px-3.5 py-2 bg-[#2D2926] hover:bg-stone-800 text-white font-semibold rounded-lg text-sm flex items-center gap-1.5 cursor-pointer min-h-[44px] md:hidden"
+            >
+              <Plus className="w-4 h-4" />
+              Add person
+            </button>
+
             <input
               type="file"
               ref={fileInputRef}
               onChange={handleImportJSON}
               accept=".json"
               className="hidden"
+              aria-hidden="true"
             />
 
-            <button
-              onClick={() => fileInputRef.current?.click()}
-              title="Import lineage register from .json file"
-              className="px-3.5 py-1.5 bg-[#FAF9F6] border border-[#E5E1DA] hover:bg-[#F5F2EF] text-[#2D2926] font-semibold rounded-lg text-xs flex items-center gap-1.5 transition-colors cursor-pointer"
-            >
-              <FileUp className="w-3.5 h-3.5 shrink-0 text-[#7A7570]" />
-              Import Tree
-            </button>
+            {seniorMode ? (
+              <button
+                onClick={handleShareBranch}
+                title="Send your family branch to a relative"
+                className="px-3.5 py-2 bg-emerald-50 border border-emerald-200 hover:bg-emerald-100 text-emerald-800 font-semibold rounded-lg text-sm flex items-center gap-1.5 cursor-pointer min-h-[44px]"
+              >
+                <Share2 className="w-4 h-4 shrink-0" />
+                Send to family
+              </button>
+            ) : (
+              <>
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  title="Import saved family file"
+                  aria-label="Import family file"
+                  className="px-3.5 py-2 bg-[#FAF9F6] border border-[#E5E1DA] hover:bg-[#F5F2EF] text-[#2D2926] font-semibold rounded-lg text-sm flex items-center gap-1.5 transition-colors cursor-pointer min-h-[44px]"
+                >
+                  <FileUp className="w-4 h-4 shrink-0 text-[#7A7570]" />
+                  Import saved file
+                </button>
 
-            <button
-              onClick={() => {
-                setActiveTab('tree');
-                setTimeout(() => window.print(), 100);
-              }}
-              title="Print Family Tree Document"
-              className="px-3.5 py-1.5 bg-[#FAF9F6] border border-[#E5E1DA] hover:bg-[#F5F2EF] text-[#2D2926] font-semibold rounded-lg text-xs flex items-center gap-1.5 transition-colors cursor-pointer hidden md:flex print:hidden"
-            >
-              <Printer className="w-3.5 h-3.5 shrink-0 text-[#7A7570]" />
-              Print Tree
-            </button>
+                <button
+                  onClick={() => {
+                    setActiveTab('tree');
+                    setTimeout(() => window.print(), 100);
+                  }}
+                  title="Print family tree"
+                  className="px-3.5 py-2 bg-[#FAF9F6] border border-[#E5E1DA] hover:bg-[#F5F2EF] text-[#2D2926] font-semibold rounded-lg text-sm flex items-center gap-1.5 transition-colors cursor-pointer hidden md:flex print:hidden min-h-[44px]"
+                >
+                  <Printer className="w-4 h-4 shrink-0 text-[#7A7570]" />
+                  Print
+                </button>
 
-            <button
-              onClick={handleExportJSON}
-              title="Export complete database as local .json file"
-              className="px-3.5 py-1.5 bg-[#FAF9F6] border border-[#E5E1DA] hover:bg-[#F5F2EF] text-[#2D2926] font-semibold rounded-lg text-xs flex items-center gap-1.5 transition-colors cursor-pointer"
-            >
-              <FileDown className="w-3.5 h-3.5 shrink-0 text-[#7A7570]" />
-              Export Tree
-            </button>
+                <button
+                  onClick={handleExportJSON}
+                  title="Export family tree file"
+                  className="px-3.5 py-2 bg-[#FAF9F6] border border-[#E5E1DA] hover:bg-[#F5F2EF] text-[#2D2926] font-semibold rounded-lg text-sm flex items-center gap-1.5 transition-colors cursor-pointer min-h-[44px]"
+                >
+                  <FileDown className="w-4 h-4 shrink-0 text-[#7A7570]" />
+                  Export
+                </button>
 
-            <button
-              onClick={handleClearTree}
-              title="Erase all records"
-              className="px-3.5 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200/60 font-semibold rounded-lg text-xs flex items-center gap-1.5 transition-colors cursor-pointer"
-            >
-              <Trash2 className="w-3.5 h-3.5" />
-              Clear
-            </button>
+                <button
+                  onClick={handleClearTree}
+                  title="Erase all records"
+                  className="px-3.5 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200/60 font-semibold rounded-lg text-sm flex items-center gap-1.5 transition-colors cursor-pointer min-h-[44px]"
+                >
+                  <Trash2 className="w-4 h-4" />
+                  Clear
+                </button>
+              </>
+            )}
 
             <button
               onClick={handleLogout}
               title="Sign out"
-              className="px-3.5 py-1.5 bg-[#FAF9F6] border border-[#E5E1DA] hover:bg-[#F5F2EF] text-[#2D2926] font-semibold rounded-lg text-xs flex items-center gap-1.5 transition-colors cursor-pointer"
+              className="px-3.5 py-2 bg-[#FAF9F6] border border-[#E5E1DA] hover:bg-[#F5F2EF] text-[#2D2926] font-semibold rounded-lg text-sm flex items-center gap-1.5 transition-colors cursor-pointer min-h-[44px]"
             >
-              <Lock className="w-3.5 h-3.5 text-[#7A7570]" />
-              Sign Out
+              <Lock className="w-4 h-4 text-[#7A7570]" />
+              Sign out
             </button>
           </div>
         </div>
       </header>
 
-      <div className="bg-[#FAF9F6] border-b border-[#E5E1DA] py-3 text-[#7A7570] select-none text-xs font-medium">
+      {!seniorMode && (
+      <div className="bg-[#FAF9F6] border-b border-[#E5E1DA] py-3 text-[#7A7570] text-xs font-medium">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 flex flex-wrap gap-x-8 gap-y-2 items-center justify-start md:justify-between">
           <div className="flex gap-x-6 gap-y-2 flex-wrap items-center">
             <span>
-              Total Record Cards:{' '}
+              People in tree:{' '}
               <strong className="font-mono text-[#2D2926] text-sm font-bold">{members.length}</strong>
             </span>
             <span className="hidden md:inline text-[#E5E1DA]">|</span>
             <span>
-              Earliest Birth:{' '}
+              Earliest birth:{' '}
               <strong className="font-mono text-[#2D2926] text-sm font-bold">
                 {members.length > 0
                   ? Math.min(
@@ -486,48 +586,91 @@ export default function App() {
           </div>
         </div>
       </div>
+      )}
 
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6 grow flex flex-col gap-6 w-full">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 select-none border-b border-[#E5E1DA] pb-0 print:hidden">
-          <div className="flex items-center gap-8 text-sm font-medium flex-wrap">
-            {(
-              [
-                ['tree', Network, 'Family Tree View'],
-                ['index', Users, 'Family Index'],
-                ['timeline', History, 'Chronicle Timeline'],
-                ['analytics', PieChart, 'Lineage Analytics'],
-                ['map', Globe, 'Geographic Atlas'],
-              ] as const
-            ).map(([tab, Icon, label]) => (
+      {seniorMode && saveStatus !== 'idle' && (
+        <div className="bg-[#FAF9F6] border-b border-[#E5E1DA] py-2 text-center text-base text-[#5C5652]">
+          <Cloud className="w-4 h-4 inline mr-1.5 align-middle" aria-hidden="true" />
+          {saveIndicator()}
+        </div>
+      )}
+
+      <main id="main-content" className="max-w-7xl mx-auto px-4 sm:px-6 py-6 grow flex flex-col gap-6 w-full">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-[#E5E1DA] pb-0 print:hidden">
+          <div className="flex items-center gap-4 sm:gap-8 text-sm font-medium flex-wrap" role="tablist" aria-label="Main sections">
+            {visibleTabs.map(([tab, Icon, label]) => (
               <button
                 key={tab}
+                role="tab"
+                aria-selected={activeTab === tab && !showForm}
                 onClick={() => {
                   setActiveTab(tab);
                   setShowForm(false);
                 }}
-                className={`pb-3.5 text-xs font-bold transition-all duration-150 flex items-center gap-2 cursor-pointer border-b-2 ${
+                className={`pb-3.5 text-sm font-bold transition-all duration-150 flex items-center gap-2 cursor-pointer border-b-2 min-h-[48px] focus-visible:ring-2 focus-visible:ring-[#2D2926] focus-visible:ring-offset-2 ${
                   activeTab === tab && !showForm
                     ? 'text-[#2D2926] border-[#2D2926]'
                     : 'text-[#7A7570] border-transparent hover:text-[#2D2926]'
                 }`}
               >
-                <Icon className="w-4 h-4 shrink-0" />
+                <Icon className="w-5 h-5 shrink-0" aria-hidden="true" />
                 {label}
               </button>
             ))}
           </div>
 
-          <div className="self-end sm:self-center shrink-0">
+          <div className="self-end sm:self-center shrink-0 hidden md:block">
+            {!isCollaborationTab && (
             <button
-              onClick={handleCreateNewMemberRequest}
-              className="px-4 py-2 bg-[#2D2926] hover:bg-stone-800 transition-colors rounded-lg text-white text-xs font-semibold flex items-center gap-2 pointer-events-auto cursor-pointer"
+              onClick={() => handleCreateNewMemberRequest()}
+              className="px-5 py-2.5 bg-[#2D2926] hover:bg-stone-800 transition-colors rounded-lg text-white text-base font-semibold flex items-center gap-2 cursor-pointer min-h-[48px] focus-visible:ring-2 focus-visible:ring-[#2D2926] focus-visible:ring-offset-2"
             >
-              <Plus className="w-4 h-4" />
-              Register Member
+              <Plus className="w-5 h-5" />
+              Add person
             </button>
+            )}
           </div>
         </div>
 
+        {isCollaborationTab ? (
+          <CollaborationHub
+            ownTreeId={treeId ?? ''}
+            ownMembers={members}
+            anchorMemberId={anchorMemberId}
+            heritageMode={heritageMode}
+            accessibleTrees={collaboration.accessibleTrees}
+            outgoingInvites={collaboration.outgoingInvites}
+            incomingInvites={collaboration.incomingInvites}
+            memberLinks={collaboration.memberLinks}
+            suggestions={collaboration.suggestions}
+            mergedMembers={collaboration.mergedMembers}
+            virtualMembers={collaboration.virtualMembers}
+            virtualById={collaboration.virtualById}
+            conflicts={collaboration.conflicts}
+            linkCandidates={collaboration.linkCandidates}
+            loading={collaboration.loading}
+            error={collaboration.error}
+            hubFocusId={collaboration.hubFocusId}
+            onFocusChange={collaboration.setHubFocusId}
+            onSendInvite={collaboration.sendInvite}
+            onAcceptInvite={collaboration.acceptInvite}
+            onDeclineInvite={collaboration.declineInvite}
+            onCancelInvite={collaboration.cancelInvite}
+            onLinkMembers={collaboration.linkMembers}
+            onAcceptLink={collaboration.acceptLink}
+            onRejectLink={collaboration.rejectLink}
+            onApproveSuggestion={async (sug) => {
+              await collaboration.approveSuggestion(sug);
+              retryLoad();
+              toast('Suggestion approved and applied to the tree.', 'success');
+            }}
+            onRejectSuggestion={collaboration.rejectSuggestion}
+            onRefresh={collaboration.refresh}
+            onSubmitSuggestion={collaboration.submitSuggestion}
+            onImportJson={handleImportMembers}
+            userDisplayName={user?.email?.split('@')[0] ?? 'Contributor'}
+          />
+        ) : (
         <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 items-start print:block">
           <div className="xl:col-span-8 space-y-6 print:w-full print:block">
             {showForm ? (
@@ -536,21 +679,37 @@ export default function App() {
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.3 }}
               >
-                <MemberForm
-                  members={members}
-                  editMemberId={editMemberId}
-                  prefillRelation={prefillRelation}
-                  prefillHeritage={prefillHeritage}
-                  showHeritageFields={heritageMode}
-                  onSave={handleSaveMember}
-                  onCancel={() => {
-                    setShowForm(false);
-                    setEditMemberId(null);
-                    setPrefillRelation(null);
-                    setPrefillHeritage(null);
-                    setMarkAsAnchor(false);
-                  }}
-                />
+                {useSimpleForm && !editMemberId ? (
+                  <SimpleMemberForm
+                    members={members}
+                    prefillRelation={prefillRelation}
+                    onSave={handleSaveMember}
+                    onCancel={() => {
+                      setShowForm(false);
+                      setEditMemberId(null);
+                      setPrefillRelation(null);
+                      setPrefillHeritage(null);
+                      setMarkAsAnchor(false);
+                    }}
+                    onShowAllDetails={() => setUseSimpleForm(false)}
+                  />
+                ) : (
+                  <MemberForm
+                    members={members}
+                    editMemberId={editMemberId}
+                    prefillRelation={prefillRelation}
+                    prefillHeritage={prefillHeritage}
+                    showHeritageFields={heritageMode}
+                    onSave={handleSaveMember}
+                    onCancel={() => {
+                      setShowForm(false);
+                      setEditMemberId(null);
+                      setPrefillRelation(null);
+                      setPrefillHeritage(null);
+                      setMarkAsAnchor(false);
+                    }}
+                  />
+                )}
               </motion.div>
             ) : showOnboarding ? (
               <OnboardingWizard
@@ -559,6 +718,7 @@ export default function App() {
                 heritageMode={heritageMode}
                 onStartDualHeritage={() => updateHeritageMode(true)}
                 onStartSingleTree={() => updateHeritageMode(false)}
+                onStartGrandparentSide={() => updateSeniorMode(true)}
                 onAddYourself={(options) => {
                   handleCreateNewMemberRequest(options);
                 }}
@@ -639,7 +799,7 @@ export default function App() {
             )}
           </div>
 
-          <div className="xl:col-span-4 select-none sticky top-24 space-y-4 print:hidden">
+          <div className="xl:col-span-4 sticky top-24 space-y-4 print:hidden">
             {activeFocusMember ? (
               <div className="bg-white border border-[#E5E1DA] rounded-xl text-left overflow-hidden flex flex-col justify-start">
                 <div className="p-6 space-y-6">
@@ -863,6 +1023,7 @@ export default function App() {
             />
           </div>
         </div>
+        )}
       </main>
 
       <footer className="bg-[#FAF9F6] text-[#7A7570] text-xs font-medium py-8 border-t border-[#E5E1DA] mt-20 select-none text-center">

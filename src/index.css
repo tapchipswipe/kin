@@ -34,3 +34,81 @@ body {
 ::-webkit-scrollbar-thumb:hover {
   background: rgba(46, 38, 32, 0.3);
 }
+
+/* Skip link for keyboard users */
+.skip-link {
+  position: absolute;
+  left: -9999px;
+  top: auto;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  z-index: 200;
+}
+.skip-link:focus {
+  position: fixed;
+  left: 1rem;
+  top: 1rem;
+  width: auto;
+  height: auto;
+  padding: 0.75rem 1.25rem;
+  background: #2D2926;
+  color: white;
+  font-size: 1rem;
+  font-weight: 600;
+  border-radius: 0.5rem;
+  outline: 2px solid white;
+  outline-offset: 2px;
+}
+
+/* Senior mode: larger type, touch targets, better contrast */
+[data-senior-mode='true'] {
+  font-size: 18px;
+  line-height: 1.5;
+}
+
+[data-senior-mode='true'] .text-xs,
+[data-senior-mode='true'] .text-\[10px\],
+[data-senior-mode='true'] .text-\[11px\] {
+  font-size: 1rem !important;
+  line-height: 1.5 !important;
+  text-transform: none !important;
+  letter-spacing: normal !important;
+  color: #5C5652 !important;
+}
+
+[data-senior-mode='true'] .text-sm {
+  font-size: 1.125rem !important;
+}
+
+[data-senior-mode='true'] button,
+[data-senior-mode='true'] [role='button'] {
+  min-height: 48px;
+  font-size: 1.125rem !important;
+}
+
+[data-senior-mode='true'] input,
+[data-senior-mode='true'] select,
+[data-senior-mode='true'] textarea {
+  font-size: 1.125rem !important;
+  padding-top: 0.75rem !important;
+  padding-bottom: 0.75rem !important;
+}
+
+[data-senior-mode='true'] input[type='checkbox'],
+[data-senior-mode='true'] input[type='radio'] {
+  width: 1.5rem !important;
+  height: 1.5rem !important;
+  min-height: unset;
+}
+
+[data-senior-mode='true'] ::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+}
+
+[data-senior-mode='true'] .senior-toast {
+  font-size: 1.125rem !important;
+  padding: 1rem 1.25rem !important;
+}
+

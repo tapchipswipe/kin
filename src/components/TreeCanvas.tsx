@@ -36,6 +36,10 @@ interface TreeCanvasProps {
   onSelectFocus: (id: string) => void;
   onAddRelativeRequest: (memberId: string, type: 'father' | 'mother' | 'spouse' | 'child') => void;
   onRegisterFirst?: () => void;
+  /** Hub merge: show which tree each person came from */
+  sourceBadges?: Record<string, string>;
+  /** Hub merge: hide add-person placeholders */
+  readOnly?: boolean;
 }
 
 export const TreeCanvas: React.FC<TreeCanvasProps> = ({
@@ -48,6 +52,8 @@ export const TreeCanvas: React.FC<TreeCanvasProps> = ({
   onSelectFocus,
   onAddRelativeRequest,
   onRegisterFirst,
+  sourceBadges,
+  readOnly = false,
 }) => {
 
   const [collapsedNodes, setCollapsedNodes] = useState<Set<string>>(new Set());
@@ -70,7 +76,9 @@ export const TreeCanvas: React.FC<TreeCanvasProps> = ({
   const focusMember = members.find((m) => m.id === focusId);
   const anchorMember = anchorMemberId ? members.find((m) => m.id === anchorMemberId) : null;
   const centerMember =
-    layout === 'dualRoots' && anchorMember ? anchorMember : focusMember;
+    (layout === 'dualRoots' || layout === 'mergedRoots') && anchorMember
+      ? anchorMember
+      : focusMember;
 
   const heritageMap = useMemo(
     () => buildHeritageMap(members, anchorMemberId ?? null),
@@ -303,11 +311,16 @@ export const TreeCanvas: React.FC<TreeCanvasProps> = ({
                 {member.heritageLabel}
               </span>
             )}
+            {sourceBadges?.[member.id] && (
+              <span className="text-[8px] px-1.5 py-0.5 rounded font-bold text-indigo-800 bg-indigo-50 border border-indigo-200 truncate max-w-[100px]">
+                {sourceBadges[member.id]}
+              </span>
+            )}
             <div className="flex items-center gap-1.5">
               {hasCollapsibleChildren && onToggleCollapse && (
                 <button
                   onClick={(e) => onToggleCollapse(member.id, e)}
-                  className="w-5 h-5 flex items-center justify-center rounded-md bg-[#FAF9F6] border border-[#E5E1DA] text-[#7A7570] hover:text-[#2D2926] hover:bg-stone-100 transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100 print:hidden"
+                  className="w-5 h-5 flex items-center justify-center rounded-md bg-[#FAF9F6] border border-[#E5E1DA] text-[#7A7570] hover:text-[#2D2926] hover:bg-stone-100 transition-colors focus:opacity-100 print:hidden"
                   title={isCollapsed ? "Expand sub-branch" : "Collapse sub-branch"}
                 >
                   {isCollapsed ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronUp className="w-3.5 h-3.5" />}
@@ -389,6 +402,7 @@ export const TreeCanvas: React.FC<TreeCanvasProps> = ({
     type: 'father' | 'mother' | 'spouse' | 'child';
     label: string;
   }) => {
+    if (readOnly) return null;
     return (
       <motion.button
         whileHover={{ 
@@ -417,7 +431,11 @@ export const TreeCanvas: React.FC<TreeCanvasProps> = ({
       <div className="bg-white rounded-xl p-6 border border-[#E5E1DA] flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <span className="text-[10px] px-2.5 py-1 rounded bg-[#FAF9F6] border border-[#E5E1DA] text-[#7A7570] font-bold tracking-widest inline-block mb-2 uppercase">
-            {layout === 'dualRoots' && anchorMember ? 'Heritage Junction' : 'Active Focus Center'}
+            {(layout === 'dualRoots' || layout === 'mergedRoots') && anchorMember
+              ? layout === 'mergedRoots'
+                ? 'Expanded Family Junction'
+                : 'Heritage Junction'
+              : 'Active Focus Center'}
           </span>
           <h2 className="text-2xl font-serif font-bold text-[#2D2926]">
             {centerMember.firstName} {centerMember.lastName}
@@ -427,6 +445,7 @@ export const TreeCanvas: React.FC<TreeCanvasProps> = ({
             REC: {centerMember.id} &bull; {centerMember.gender.toUpperCase()} &bull; {getYearSpan(centerMember)}
           </p>
         </div>
+        {!readOnly && (
         <div className="flex items-center gap-2 self-start md:self-center shrink-0 print:hidden">
           <button
             onClick={() => onAddRelativeRequest(centerMember.id, 'spouse')}
@@ -443,9 +462,11 @@ export const TreeCanvas: React.FC<TreeCanvasProps> = ({
             Add Child
           </button>
         </div>
+        )}
       </div>
 
       {/* 2. Style & Layout Control Bar */}
+      {!readOnly && (
       <div className="flex flex-wrap items-center justify-between gap-3 bg-[#FAF9F6] border border-[#E5E1DA] rounded-xl px-4 py-3 print:hidden">
         <span className="text-xs font-mono font-bold text-[#7A7570] flex items-center gap-1.5 uppercase select-none">
           <Layers className="w-3.5 h-3.5 text-stone-500" /> Blueprint View Layout:
@@ -499,9 +520,10 @@ export const TreeCanvas: React.FC<TreeCanvasProps> = ({
           </button>
         </div>
       </div>
+      )}
 
       {/* 3. Conditional Layout Renderer */}
-      {layout === 'hierarchical' && (
+      {(layout === 'hierarchical' || (layout === 'mergedRoots' && !anchorMember)) && (
         <div className="space-y-10 relative">
           {/* --- GRID TIER 1: GRANDPARENTS (Great Ancestry Index) --- */}
           {((father && !collapsedNodes.has(father.id)) || (mother && !collapsedNodes.has(mother.id)) || (!father && !mother)) && (
@@ -920,10 +942,12 @@ export const TreeCanvas: React.FC<TreeCanvasProps> = ({
         </div>
       )}
 
-      {layout === 'dualRoots' && (
+      {(layout === 'dualRoots' || (layout === 'mergedRoots' && anchorMember)) && (
         <div className="space-y-8 relative">
           <div className="text-center text-xs text-[#7A7570] bg-[#FAF9F6] border border-[#E5E1DA] rounded-xl p-4 max-w-2xl mx-auto">
-            Both heritage lines meet here. Build each branch upward — maternal on the left, paternal on the right.
+            {layout === 'mergedRoots'
+              ? 'Trees connected at link points — each person keeps their source tree. Details are combined in this expanded view.'
+              : 'Both heritage lines meet here. Build each branch upward — maternal on the left, paternal on the right.'}
           </div>
 
           {/* Grandparents row — split by side */}

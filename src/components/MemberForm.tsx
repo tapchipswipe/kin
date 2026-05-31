@@ -251,17 +251,17 @@ export const MemberForm: React.FC<MemberFormProps> = ({
   };
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-8 pb-10 text-left select-none text-[#2D2926]">
+    <form onSubmit={handleSubmit} className="space-y-8 pb-10 text-left text-[#2D2926]">
       
       {/* 0. Form Mode Indicator Header */}
       <div className="border-b border-[#E5E1DA] pb-4">
         <h3 className="text-xl font-serif font-bold text-[#2D2926]">
-          {isEditMode ? `Edit Profile & Lineage` : `Add Family Member Registry`}
+          {isEditMode ? `Edit family member` : `Add a family member`}
         </h3>
         <p className="text-xs text-[#7A7570] mt-1">
           {isEditMode 
             ? 'Modify biographical parameters, historic timelines, and family relationships.'
-            : 'Fill in the record card to inject a new ancestor or descendant node into your tree.'}
+            : 'Fill in the details to add someone to your family tree.'}
         </p>
       </div>
 
@@ -309,7 +309,7 @@ export const MemberForm: React.FC<MemberFormProps> = ({
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
           {/* Gender */}
           <div>
-            <label className="block text-xs font-semibold text-[#2D2926] mb-1">Biological Gender Selection</label>
+            <label className="block text-xs font-semibold text-[#2D2926] mb-1">Gender</label>
             <select
               value={gender}
               onChange={(e) => setGender(e.target.value as any)}
@@ -335,7 +335,7 @@ export const MemberForm: React.FC<MemberFormProps> = ({
 
           {/* Avatar Color */}
           <div>
-            <label className="block text-xs font-semibold text-[#2D2926] mb-1">Visual Tree Color Hue</label>
+            <label className="block text-xs font-semibold text-[#2D2926] mb-1">Photo color (optional)</label>
             <div className="flex flex-wrap gap-1.5 items-center justify-start h-9 border border-[#E5E1DA] bg-[#FAF9F6] px-2 rounded-lg">
               {AVATAR_COLORS.map((color) => (
                 <button
@@ -354,7 +354,7 @@ export const MemberForm: React.FC<MemberFormProps> = ({
 
         {/* Biography Block */}
         <div>
-          <label className="block text-xs font-semibold text-[#2D2926] mb-1">Archival Biography & Notes</label>
+          <label className="block text-xs font-semibold text-[#2D2926] mb-1">Their story</label>
           <textarea
             rows={4}
             placeholder="Write a custom overview describing who this person was, major life themes, personal qualities, or historical achievements..."
@@ -488,7 +488,7 @@ export const MemberForm: React.FC<MemberFormProps> = ({
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {/* Father */}
           <div>
-            <label className="block text-xs font-semibold text-[#2D2926] mb-1">Father Pointer</label>
+            <label className="block text-xs font-semibold text-[#2D2926] mb-1">Father</label>
             <select
               value={fatherId}
               onChange={(e) => setFatherId(e.target.value)}
@@ -497,7 +497,7 @@ export const MemberForm: React.FC<MemberFormProps> = ({
               <option value="">No Father Recorded</option>
               {maleMembers.map((m) => (
                 <option key={m.id} value={m.id}>
-                  {m.firstName} {m.lastName} (b. {m.birthDate ? m.birthDate.slice(0, 4) : '????'}, ID: {m.id})
+                  {m.firstName} {m.lastName} (b. {m.birthDate ? m.birthDate.slice(0, 4) : '????'})
                 </option>
               ))}
             </select>
@@ -505,7 +505,7 @@ export const MemberForm: React.FC<MemberFormProps> = ({
 
           {/* Mother */}
           <div>
-            <label className="block text-xs font-semibold text-[#2D2926] mb-1">Mother Pointer</label>
+            <label className="block text-xs font-semibold text-[#2D2926] mb-1">Mother</label>
             <select
               value={motherId}
               onChange={(e) => setMotherId(e.target.value)}
@@ -514,7 +514,7 @@ export const MemberForm: React.FC<MemberFormProps> = ({
               <option value="">No Mother Recorded</option>
               {femaleMembers.map((m) => (
                 <option key={m.id} value={m.id}>
-                  {m.firstName} {m.lastName} (b. {m.birthDate ? m.birthDate.slice(0, 4) : '????'}, ID: {m.id})
+                  {m.firstName} {m.lastName} (b. {m.birthDate ? m.birthDate.slice(0, 4) : '????'})
                 </option>
               ))}
             </select>
@@ -539,7 +539,7 @@ export const MemberForm: React.FC<MemberFormProps> = ({
                         className="rounded border-[#E5E1DA] text-[#2D2926] focus:ring-[#2D2926] accent-[#2D2926] pointer-events-auto shrink-0 h-3.5 w-3.5"
                       />
                       <span className="font-medium">
-                        {m.firstName} {m.lastName} <span className="font-mono text-[#A8A29E] text-[10px] ml-1">({m.birthDate ? m.birthDate.slice(0, 4) : '????'}, ID: {m.id})</span>
+                        {m.firstName} {m.lastName} <span className="font-mono text-[#A8A29E] text-[10px] ml-1">({m.birthDate ? m.birthDate.slice(0, 4) : '????'})</span>
                       </span>
                     </label>
                   );
@@ -569,7 +569,7 @@ export const MemberForm: React.FC<MemberFormProps> = ({
                         className="rounded border-[#E5E1DA] text-[#2D2926] focus:ring-[#2D2926] accent-[#2D2926] pointer-events-auto shrink-0 h-3.5 w-3.5"
                       />
                       <span className="font-medium">
-                        {m.firstName} {m.lastName} <span className="font-mono text-[#A8A29E] text-[10px] ml-1">({m.birthDate ? m.birthDate.slice(0, 4) : '????'}, ID: {m.id})</span>
+                        {m.firstName} {m.lastName} <span className="font-mono text-[#A8A29E] text-[10px] ml-1">({m.birthDate ? m.birthDate.slice(0, 4) : '????'})</span>
                       </span>
                     </label>
                   );
@@ -675,7 +675,7 @@ export const MemberForm: React.FC<MemberFormProps> = ({
               onClick={handleAddMilestone}
               className="px-4 py-1.5 bg-[#2D2926] hover:bg-[#1C1A18] text-[#FAF9F6] border border-transparent rounded text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer"
             >
-              <Plus className="w-3.5 h-3.5" /> Commit Milestone Event
+              <Plus className="w-3.5 h-3.5" /> Add milestone
             </button>
           </div>
         </div>

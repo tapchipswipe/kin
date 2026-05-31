@@ -22,6 +22,7 @@ interface OnboardingWizardProps {
   heritageMode: boolean;
   onStartDualHeritage: () => void;
   onStartSingleTree: () => void;
+  onStartGrandparentSide: () => void;
   onAddYourself: (options?: { asAnchor?: boolean }) => void;
   onAddParent: () => void;
   onAddMaternalSide: (heritageLabel: string) => void;
@@ -36,6 +37,7 @@ export function OnboardingWizard({
   heritageMode,
   onStartDualHeritage,
   onStartSingleTree,
+  onStartGrandparentSide,
   onAddYourself,
   onAddParent,
   onAddMaternalSide,
@@ -43,7 +45,7 @@ export function OnboardingWizard({
   onImport,
   onDismiss,
 }: OnboardingWizardProps) {
-  const [path, setPath] = useState<'choose' | 'single' | 'dual'>('choose');
+  const [path, setPath] = useState<'choose' | 'single' | 'dual' | 'grandparent'>('choose');
   const [maternalLabel, setMaternalLabel] = useState('');
   const [paternalLabel, setPaternalLabel] = useState('');
 
@@ -70,24 +72,37 @@ export function OnboardingWizard({
             Welcome
           </span>
           <h2 className="text-xl font-serif font-bold text-[#2D2926]">Welcome to Kith & Kin</h2>
-          <p className="text-sm text-[#7A7570] leading-relaxed">
-            Your cloud-backed family archive. Do you have two family heritages you&apos;d like to
-            preserve — where your stories meet at you?
+          <p className="text-base text-[#5C5652] leading-relaxed">
+            Save your family tree online. How would you like to start?
           </p>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-lg mx-auto">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 max-w-2xl mx-auto">
+          <button
+            onClick={() => {
+              onStartGrandparentSide();
+              setPath('grandparent');
+            }}
+            className="flex flex-col items-center gap-2 p-5 bg-white border-2 border-emerald-200 rounded-xl hover:border-emerald-400 transition-colors cursor-pointer group min-h-[120px]"
+          >
+            <UserPlus className="w-7 h-7 text-emerald-600" />
+            <span className="text-sm font-bold text-[#2D2926]">My side of the family</span>
+            <span className="text-sm text-[#5C5652] leading-relaxed">
+              I&apos;m adding parents, grandparents, and relatives
+            </span>
+          </button>
+
           <button
             onClick={() => {
               onStartDualHeritage();
               setPath('dual');
             }}
-            className="flex flex-col items-center gap-2 p-5 bg-white border-2 border-rose-200 rounded-xl hover:border-rose-400 transition-colors cursor-pointer group"
+            className="flex flex-col items-center gap-2 p-5 bg-white border-2 border-rose-200 rounded-xl hover:border-rose-400 transition-colors cursor-pointer group min-h-[120px]"
           >
             <GitBranch className="w-7 h-7 text-rose-500" />
-            <span className="text-sm font-bold text-[#2D2926]">Two Heritages</span>
-            <span className="text-[10px] text-[#7A7570] leading-relaxed">
-              Maternal &amp; paternal lines meeting at you
+            <span className="text-sm font-bold text-[#2D2926]">Two heritages</span>
+            <span className="text-sm text-[#5C5652] leading-relaxed">
+              Both parents&apos; families meet at you
             </span>
           </button>
 
@@ -96,31 +111,62 @@ export function OnboardingWizard({
               onStartSingleTree();
               setPath('single');
             }}
-            className="flex flex-col items-center gap-2 p-5 bg-white border border-[#E5E1DA] rounded-xl hover:border-[#2D2926] transition-colors cursor-pointer group"
+            className="flex flex-col items-center gap-2 p-5 bg-white border border-[#E5E1DA] rounded-xl hover:border-[#2D2926] transition-colors cursor-pointer group min-h-[120px]"
           >
             <Users className="w-7 h-7 text-[#7A7570] group-hover:text-[#2D2926]" />
-            <span className="text-sm font-bold text-[#2D2926]">Single Tree</span>
-            <span className="text-[10px] text-[#7A7570] leading-relaxed">
-              One lineage, build outward from anyone
+            <span className="text-sm font-bold text-[#2D2926]">One family tree</span>
+            <span className="text-sm text-[#5C5652] leading-relaxed">
+              Build outward from anyone
             </span>
           </button>
         </div>
 
         <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
           <button
-            onClick={onImport}
-            className="px-4 py-2 text-[#7A7570] text-sm font-medium hover:text-[#2D2926] cursor-pointer flex items-center gap-1.5"
-          >
-            <FileUp className="w-4 h-4" />
-            Import from JSON
-          </button>
-          <button
             onClick={onDismiss}
-            className="px-4 py-2 text-[#A8A29E] text-xs hover:text-[#7A7570] cursor-pointer"
+            className="px-4 py-2 text-[#5C5652] text-base hover:text-[#2D2926] cursor-pointer min-h-[44px]"
           >
             Skip for now
           </button>
+          <button
+            onClick={onImport}
+            className="px-4 py-2 text-[#A8A29E] text-sm hover:text-[#7A7570] cursor-pointer flex items-center gap-1.5 min-h-[44px]"
+          >
+            <FileUp className="w-4 h-4" />
+            Advanced: import saved file
+          </button>
         </div>
+      </div>
+    );
+  }
+
+  if (path === 'grandparent') {
+    return (
+      <div className="border-2 border-[#E5E1DA] rounded-2xl bg-gradient-to-br from-[#FAF9F6] to-white p-8 text-center space-y-6">
+        <div className="w-14 h-14 bg-emerald-50 border border-emerald-100 rounded-2xl flex items-center justify-center mx-auto">
+          <UserPlus className="w-7 h-7 text-emerald-600" />
+        </div>
+        <div className="space-y-2 max-w-md mx-auto">
+          <h2 className="text-xl font-serif font-bold text-[#2D2926]">Add your side of the family</h2>
+          <p className="text-base text-[#5C5652] leading-relaxed">
+            Start with yourself, a parent, or a grandparent — whoever you know best. You can add
+            more people one at a time.
+          </p>
+        </div>
+        <button
+          onClick={() => onAddYourself()}
+          className="px-6 py-3 bg-[#2D2926] text-white rounded-lg text-lg font-bold flex items-center gap-2 hover:bg-[#1C1A18] cursor-pointer mx-auto min-h-[52px]"
+        >
+          <UserPlus className="w-5 h-5" />
+          Add someone
+          <ArrowRight className="w-5 h-5" />
+        </button>
+        <button
+          onClick={onDismiss}
+          className="text-base text-[#5C5652] hover:text-[#2D2926] cursor-pointer min-h-[44px]"
+        >
+          I&apos;ll explore on my own
+        </button>
       </div>
     );
   }
