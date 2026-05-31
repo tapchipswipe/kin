@@ -14,7 +14,7 @@ interface SimpleMemberFormProps {
   members: FamilyMember[];
   prefillRelation?: {
     memberId: string;
-    type: 'father' | 'mother' | 'spouse' | 'child';
+    type: 'father' | 'mother' | 'spouse' | 'child' | 'sibling';
   } | null;
   onSave: (member: FamilyMember) => void;
   onCancel: () => void;
@@ -62,6 +62,7 @@ export function SimpleMemberForm({
     let fatherId: string | null = null;
     let motherId: string | null = null;
     let childrenIds: string[] = [];
+    let spouseIds: string[] = [];
 
     if (prefillRelation) {
       const pivot = members.find((m) => m.id === prefillRelation.memberId);
@@ -75,6 +76,11 @@ export function SimpleMemberForm({
         } else if (prefillRelation.type === 'mother') {
           motherId = null;
           childrenIds = [pivot.id];
+        } else if (prefillRelation.type === 'sibling') {
+          fatherId = pivot.fatherId ?? null;
+          motherId = pivot.motherId ?? null;
+        } else if (prefillRelation.type === 'spouse') {
+          spouseIds = [pivot.id];
         }
       }
     }
@@ -91,7 +97,7 @@ export function SimpleMemberForm({
       avatarUrl: AVATAR_COLORS[Math.floor(Math.random() * AVATAR_COLORS.length)],
       fatherId,
       motherId,
-      spouseIds: [],
+      spouseIds,
       childrenIds,
       events: [],
     };
@@ -260,7 +266,7 @@ export function SimpleMemberForm({
                 toast('Please enter a first and last name.', 'error');
                 return;
               }
-              setStep(1);
+              setStep(prefillRelation?.type === 'sibling' ? 2 : 1);
             }}
             className="flex-1 min-h-[52px] px-5 py-2.5 bg-[#2D2926] text-white rounded-lg text-lg font-bold hover:bg-[#1C1A18] cursor-pointer flex items-center justify-center gap-2"
           >

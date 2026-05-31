@@ -78,6 +78,33 @@ export interface TreeInvite {
   createdAt: string;
 }
 
+export type CollabConnectionStatus = 'none' | 'pending_out' | 'pending_in' | 'connected';
+
+export interface FamilyDirectoryEntry {
+  userId: string;
+  firstName: string;
+  lastName: string;
+  connectionStatus: CollabConnectionStatus;
+  requestId?: string;
+}
+
+export interface CollabRequest {
+  id: string;
+  requesterId: string;
+  requesterFirstName: string;
+  requesterLastName: string;
+  targetUserId: string;
+  status: 'pending' | 'accepted' | 'declined' | 'cancelled';
+  createdAt: string;
+}
+
+export interface UserProfile {
+  id: string;
+  firstName: string;
+  lastName: string;
+  displayName: string | null;
+}
+
 export interface MergedMemberSource {
   treeId: string;
   treeName: string;

@@ -13,7 +13,7 @@ interface MemberFormProps {
   editMemberId: string | null;            // If null, we are in "Create New" mode
   prefillRelation?: {
     memberId: string;
-    type: 'father' | 'mother' | 'spouse' | 'child';
+    type: 'father' | 'mother' | 'spouse' | 'child' | 'sibling';
   } | null;
   prefillHeritage?: {
     side: HeritageSide;
@@ -140,6 +140,9 @@ export const MemberForm: React.FC<MemberFormProps> = ({
             defSpouses = [pivotMember.id];
             // set inverse gender default
             defaultGender = pivotMember.gender === 'male' ? 'female' : 'male';
+          } else if (prefillRelation.type === 'sibling') {
+            defFather = pivotMember.fatherId || '';
+            defMother = pivotMember.motherId || '';
           }
         }
       }

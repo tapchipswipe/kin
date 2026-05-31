@@ -34,7 +34,7 @@ interface TreeCanvasProps {
   layout: TreeLayout;
   onLayoutChange: (layout: TreeLayout) => void;
   onSelectFocus: (id: string) => void;
-  onAddRelativeRequest: (memberId: string, type: 'father' | 'mother' | 'spouse' | 'child') => void;
+  onAddRelativeRequest: (memberId: string, type: 'father' | 'mother' | 'spouse' | 'child' | 'sibling') => void;
   onRegisterFirst?: () => void;
   /** Hub merge: show which tree each person came from */
   sourceBadges?: Record<string, string>;
@@ -129,7 +129,7 @@ export const TreeCanvas: React.FC<TreeCanvasProps> = ({
   const maternalGrandmother = mother?.motherId ? members.find((m) => m.id === mother.motherId) : null;
 
   // Spouses
-  const spouses = members.filter((m) => centerMember.spouseIds.includes(m.id));
+  const spouses = members.filter((m) => (centerMember.spouseIds ?? []).includes(m.id));
 
   const siblings = members.filter((m) => {
     if (m.id === centerMember.id) return false;
@@ -138,7 +138,7 @@ export const TreeCanvas: React.FC<TreeCanvasProps> = ({
     return sameFather || sameMother;
   });
 
-  const children = members.filter((m) => centerMember.childrenIds.includes(m.id));
+  const children = members.filter((m) => (centerMember.childrenIds ?? []).includes(m.id));
 
   // Helper helper to format dates beautifully
   const getYearSpan = (m: FamilyMember) => {
@@ -210,7 +210,7 @@ export const TreeCanvas: React.FC<TreeCanvasProps> = ({
     }
 
     // Grandchildren
-    const grandchildren = children.flatMap((c) => members.filter((m) => c.childrenIds.includes(m.id)));
+    const grandchildren = children.flatMap((c) => members.filter((m) => (c.childrenIds ?? []).includes(m.id)));
     if (grandchildren.length === 1) {
       list.push({ member: grandchildren[0], role: 'Grandchild', r: 260, angle: 90 });
     } else if (grandchildren.length > 1) {
@@ -253,7 +253,7 @@ export const TreeCanvas: React.FC<TreeCanvasProps> = ({
     }
     if (roleLabel === 'Grandchild') {
       // Find which child index matches this grandchild's parent
-      const parent = children.find((c) => c.childrenIds.includes(member.id));
+      const parent = children.find((c) => (c.childrenIds ?? []).includes(member.id));
       if (parent) {
         const idx = children.indexOf(parent);
         const parentAngle = children.length === 1 ? 90 : 45 + (idx * 90) / (children.length - 1);
@@ -399,7 +399,7 @@ export const TreeCanvas: React.FC<TreeCanvasProps> = ({
     label,
   }: {
     targetId: string;
-    type: 'father' | 'mother' | 'spouse' | 'child';
+    type: 'father' | 'mother' | 'spouse' | 'child' | 'sibling';
     label: string;
   }) => {
     if (readOnly) return null;
@@ -460,6 +460,13 @@ export const TreeCanvas: React.FC<TreeCanvasProps> = ({
           >
             <Plus className="w-3.5 h-3.5 text-[#2D2926]" />
             Add Child
+          </button>
+          <button
+            onClick={() => onAddRelativeRequest(centerMember.id, 'sibling')}
+            className="px-3.5 py-1.5 text-xs font-semibold border border-[#E5E1DA] rounded-lg hover:bg-[#FAF9F6] text-[#2D2926] flex items-center gap-1.5 cursor-pointer leading-snug"
+          >
+            <Users className="w-3.5 h-3.5 text-[#2D2926]" />
+            Add Sibling
           </button>
         </div>
         )}
@@ -667,9 +674,11 @@ export const TreeCanvas: React.FC<TreeCanvasProps> = ({
                         <MemberNode key={sib.id} member={sib} roleLabel="Sibling" />
                       ))
                     ) : (
-                      <div className="text-[11px] text-[#7A7570] italic p-4 text-center border border-[#E5E1DA] rounded-lg bg-white print:hidden">
-                        No siblings recorded
-                      </div>
+                      <EmptyPlaceholderNode
+                        targetId={centerMember.id}
+                        type="sibling"
+                        label="Add Sibling"
+                      />
                     )}
                   </div>
                 </div>
@@ -718,7 +727,7 @@ export const TreeCanvas: React.FC<TreeCanvasProps> = ({
                     member={child} 
                     roleLabel="Child" 
                     isCollapsed={collapsedNodes.has(child.id)}
-                    hasCollapsibleChildren={child.childrenIds.length > 0}
+                    hasCollapsibleChildren={(child.childrenIds ?? []).length > 0}
                     onToggleCollapse={handleToggleCollapse}
                   />
                 ))
@@ -751,7 +760,7 @@ export const TreeCanvas: React.FC<TreeCanvasProps> = ({
                   const visibleGrandchildren = children
                     .filter((c) => !collapsedNodes.has(c.id))
                     .flatMap((c) => 
-                      members.filter((m) => c.childrenIds.includes(m.id)).map(gc => ({ gc, parent: c }))
+                      members.filter((m) => (c.childrenIds ?? []).includes(m.id)).map(gc => ({ gc, parent: c }))
                     );
                   
                   if (visibleGrandchildren.length > 0) {
@@ -761,7 +770,7 @@ export const TreeCanvas: React.FC<TreeCanvasProps> = ({
                         <MemberNode member={gc} roleLabel="Grandchild" />
                       </div>
                     ));
-                  } else if (children.every(c => collapsedNodes.has(c.id)) && children.flatMap(c => c.childrenIds).length > 0) {
+                  } else if (children.every(c => collapsedNodes.has(c.id)) && children.flatMap(c => c.childrenIds ?? []).length > 0) {
                      return (
                       <div className="col-span-full py-6 text-center text-xs text-[#7A7570] italic bg-[#FAF9F6] rounded-lg border border-dashed border-[#E5E1DA] max-w-sm mx-auto w-full print:hidden">
                         Grandchildren branches are currently collapsed.
@@ -907,13 +916,15 @@ export const TreeCanvas: React.FC<TreeCanvasProps> = ({
               </h4>
               <div className="space-y-2">
                 {siblings.length > 0 ? (
-                  siblings.map(sibling => (
+                  siblings.map((sibling) => (
                     <MemberNode key={sibling.id} member={sibling} roleLabel="Sibling" />
                   ))
                 ) : (
-                  <div className="text-xs text-[#7A7570] italic p-4 text-center border border-dashed border-[#E5E1DA] rounded-lg bg-white select-none">
-                    No siblings recorded.
-                  </div>
+                  <EmptyPlaceholderNode
+                    targetId={centerMember.id}
+                    type="sibling"
+                    label="Add Sibling"
+                  />
                 )}
               </div>
             </div>
@@ -927,7 +938,7 @@ export const TreeCanvas: React.FC<TreeCanvasProps> = ({
                 {children.map(child => (
                   <MemberNode key={child.id} member={child} roleLabel="Child" />
                 ))}
-                {children.length > 0 && children.flatMap(c => members.filter(m => c.childrenIds.includes(m.id))).map(gChild => (
+                {children.length > 0 && children.flatMap(c => members.filter(m => (c.childrenIds ?? []).includes(m.id))).map(gChild => (
                   <MemberNode key={gChild.id} member={gChild} roleLabel="Grandchild" />
                 ))}
                 {children.length === 0 && (

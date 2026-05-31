@@ -17,12 +17,15 @@ import { LineageMap } from './components/LineageMap';
 import { AuthScreen } from './components/AuthScreen';
 import { OnboardingWizard } from './components/OnboardingWizard';
 import { CollaborationHub } from './components/CollaborationHub';
+import { ProfileSetup } from './components/ProfileSetup';
 import { useAuth } from './hooks/useAuth';
 import { useLineageStore } from './hooks/useLineageStore';
 import { useCollaborationStore } from './hooks/useCollaborationStore';
 import { useAppDialog } from './hooks/useAppDialog';
 import { removeMemberCleanly, findSiblings, getEraLabel } from './utils';
 import { shareBranchWithFamily } from './lib/shareBranch';
+import { loadUserProfile, profileNeedsNames } from './lib/profileDb';
+import type { UserProfile } from './types';
 import {
   Network,
   Users,
@@ -76,11 +79,25 @@ export default function App() {
 
   const collaboration = useCollaborationStore(
     user?.id,
-    treeId,
+    treeId ?? undefined,
     members,
-    anchorMemberId,
-    user?.email
+    anchorMemberId
   );
+
+  const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
+  const [profileLoading, setProfileLoading] = useState(false);
+
+  useEffect(() => {
+    if (!user?.id) {
+      setUserProfile(null);
+      return;
+    }
+    setProfileLoading(true);
+    loadUserProfile(user.id)
+      .then(setUserProfile)
+      .catch(() => setUserProfile(null))
+      .finally(() => setProfileLoading(false));
+  }, [user?.id]);
 
   const [activeTab, setActiveTab] = useState<
     'tree' | 'index' | 'timeline' | 'analytics' | 'map' | 'collaboration'
@@ -89,7 +106,7 @@ export default function App() {
   const [editMemberId, setEditMemberId] = useState<string | null>(null);
   const [prefillRelation, setPrefillRelation] = useState<{
     memberId: string;
-    type: 'father' | 'mother' | 'spouse' | 'child';
+    type: 'father' | 'mother' | 'spouse' | 'child' | 'sibling';
   } | null>(null);
   const [prefillHeritage, setPrefillHeritage] = useState<{
     side: HeritageSide;
@@ -257,14 +274,21 @@ export default function App() {
 
   const handleAddRelativeRequest = (
     memberId: string,
-    type: 'father' | 'mother' | 'spouse' | 'child',
+    type: 'father' | 'mother' | 'spouse' | 'child' | 'sibling',
     heritage?: { side: HeritageSide; label?: string }
   ) => {
+    if (type === 'sibling') {
+      const pivot = members.find((m) => m.id === memberId);
+      if (!pivot?.fatherId && !pivot?.motherId) {
+        toast('Add a mother or father first, then you can add siblings.', 'info');
+        return;
+      }
+    }
     setEditMemberId(null);
     setPrefillRelation({ memberId, type });
     setPrefillHeritage(heritage ?? null);
     setMarkAsAnchor(false);
-    setUseSimpleForm(seniorMode);
+    setUseSimpleForm(seniorMode && type !== 'sibling');
     setShowForm(true);
   };
 
@@ -356,10 +380,10 @@ export default function App() {
     ? members.find((m) => m.id === activeFocusMember.motherId)
     : null;
   const activeSpouses = activeFocusMember
-    ? members.filter((m) => activeFocusMember.spouseIds.includes(m.id))
+    ? members.filter((m) => (activeFocusMember.spouseIds ?? []).includes(m.id))
     : [];
   const activeChildren = activeFocusMember
-    ? members.filter((m) => activeFocusMember.childrenIds.includes(m.id))
+    ? members.filter((m) => (activeFocusMember.childrenIds ?? []).includes(m.id))
     : [];
   const activeSiblings = activeFocusMember ? findSiblings(members, activeFocusMember) : [];
 
@@ -399,6 +423,26 @@ export default function App() {
           </button>
         </div>
       </div>
+    );
+  }
+
+  if (profileLoading) {
+    return (
+      <div className="min-h-screen bg-[#FDFCFB] flex items-center justify-center">
+        <Loader2 className="w-6 h-6 animate-spin text-[#7A7570]" />
+      </div>
+    );
+  }
+
+  if (user && !profileLoading && (!userProfile || profileNeedsNames(userProfile))) {
+    return (
+      <ProfileSetup
+        userId={user.id}
+        onComplete={(profile) => {
+          setUserProfile(profile);
+          collaboration.refresh();
+        }}
+      />
     );
   }
 
@@ -635,12 +679,13 @@ export default function App() {
         {isCollaborationTab ? (
           <CollaborationHub
             ownTreeId={treeId ?? ''}
+            ownUserId={user.id}
             ownMembers={members}
             anchorMemberId={anchorMemberId}
             heritageMode={heritageMode}
             accessibleTrees={collaboration.accessibleTrees}
-            outgoingInvites={collaboration.outgoingInvites}
-            incomingInvites={collaboration.incomingInvites}
+            familyDirectory={collaboration.familyDirectory}
+            incomingCollabRequests={collaboration.incomingCollabRequests}
             memberLinks={collaboration.memberLinks}
             suggestions={collaboration.suggestions}
             mergedMembers={collaboration.mergedMembers}
@@ -650,12 +695,14 @@ export default function App() {
             linkCandidates={collaboration.linkCandidates}
             loading={collaboration.loading}
             error={collaboration.error}
+            schemaMissing={collaboration.schemaMissing}
             hubFocusId={collaboration.hubFocusId}
             onFocusChange={collaboration.setHubFocusId}
-            onSendInvite={collaboration.sendInvite}
-            onAcceptInvite={collaboration.acceptInvite}
-            onDeclineInvite={collaboration.declineInvite}
-            onCancelInvite={collaboration.cancelInvite}
+            onAskToCollab={collaboration.askToCollab}
+            onAcceptCollab={collaboration.acceptCollab}
+            onDeclineCollab={collaboration.declineCollab}
+            onCancelCollab={collaboration.cancelCollab}
+            onDisconnect={collaboration.disconnectFromUser}
             onLinkMembers={collaboration.linkMembers}
             onAcceptLink={collaboration.acceptLink}
             onRejectLink={collaboration.rejectLink}
@@ -668,7 +715,11 @@ export default function App() {
             onRefresh={collaboration.refresh}
             onSubmitSuggestion={collaboration.submitSuggestion}
             onImportJson={handleImportMembers}
-            userDisplayName={user?.email?.split('@')[0] ?? 'Contributor'}
+            userDisplayName={
+              userProfile
+                ? `${userProfile.firstName} ${userProfile.lastName}`.trim()
+                : 'Contributor'
+            }
           />
         ) : (
         <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 items-start print:block">

@@ -6,6 +6,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Heart, Loader2, Mail, Eye, EyeOff } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
+import { updateUserProfileNames } from '../lib/profileDb';
+import { supabase } from '../lib/supabase';
 
 type AuthMode = 'signin' | 'signup' | 'reset' | 'check-email';
 
@@ -14,6 +16,8 @@ export function AuthScreen() {
   const [mode, setMode] = useState<AuthMode>('signin');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -35,9 +39,24 @@ export function AuthScreen() {
         if (result.error) setError(result.error);
         else setMessage('Check your email for a link to reset your password.');
       } else if (mode === 'signup') {
+        if (!firstName.trim() || !lastName.trim()) {
+          setError('Please enter your first and last name.');
+          return;
+        }
         const result = await signUp(email, password);
         if (result.error) setError(result.error);
-        else setMode('check-email');
+        else {
+          const { data: { session } } = await supabase.auth.getSession();
+          if (session?.user) {
+            try {
+              await updateUserProfileNames(session.user.id, firstName, lastName);
+            } catch {
+              /* ProfileSetup will collect on first login */
+            }
+          } else {
+            setMode('check-email');
+          }
+        }
       } else {
         const result = await signIn(email, password);
         if (result.error) setError(result.error);
@@ -141,6 +160,39 @@ export function AuthScreen() {
               className="w-full bg-white border border-[#E5E1DA] text-[#2D2926] rounded-lg px-4 py-3 text-lg focus-visible:ring-2 focus-visible:ring-[#2D2926] focus-visible:ring-offset-2 outline-none"
             />
           </div>
+
+          {mode === 'signup' && (
+            <>
+              <div>
+                <label htmlFor="firstName" className="block text-base font-semibold text-[#2D2926] mb-2">
+                  First name
+                </label>
+                <input
+                  id="firstName"
+                  type="text"
+                  value={firstName}
+                  onChange={(e) => setFirstName(e.target.value)}
+                  required
+                  autoComplete="given-name"
+                  className="w-full bg-white border border-[#E5E1DA] text-[#2D2926] rounded-lg px-4 py-3 text-lg focus-visible:ring-2 focus-visible:ring-[#2D2926] focus-visible:ring-offset-2 outline-none"
+                />
+              </div>
+              <div>
+                <label htmlFor="lastName" className="block text-base font-semibold text-[#2D2926] mb-2">
+                  Last name
+                </label>
+                <input
+                  id="lastName"
+                  type="text"
+                  value={lastName}
+                  onChange={(e) => setLastName(e.target.value)}
+                  required
+                  autoComplete="family-name"
+                  className="w-full bg-white border border-[#E5E1DA] text-[#2D2926] rounded-lg px-4 py-3 text-lg focus-visible:ring-2 focus-visible:ring-[#2D2926] focus-visible:ring-offset-2 outline-none"
+                />
+              </div>
+            </>
+          )}
 
           {showPasswordField && (
             <div>

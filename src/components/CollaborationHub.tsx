@@ -6,8 +6,9 @@
 import React, { useMemo, useState } from 'react';
 import {
   AccessibleTree,
-  CollaborationRole,
+  CollabRequest,
   FamilyMember,
+  FamilyDirectoryEntry,
   MemberLink,
   ProposedSuggestion,
   VirtualMember,
@@ -18,28 +19,27 @@ import { sourceBadgeForMember } from '../lib/treeMerge';
 import { downloadFamilyJson } from '../lib/shareBranch';
 import {
   Users,
-  Share2,
   Check,
   X,
   Eye,
-  UserPlus,
   FileCheck,
   Link2,
   Loader2,
-  Bell,
-  FileUp,
   AlertTriangle,
   GitBranch,
+  UserPlus,
+  Database,
 } from 'lucide-react';
 
 export interface CollaborationHubProps {
   ownTreeId: string;
+  ownUserId: string;
   ownMembers: FamilyMember[];
   anchorMemberId: string | null;
   heritageMode: boolean;
   accessibleTrees: AccessibleTree[];
-  outgoingInvites: import('../types').TreeInvite[];
-  incomingInvites: import('../types').TreeInvite[];
+  familyDirectory: FamilyDirectoryEntry[];
+  incomingCollabRequests: CollabRequest[];
   memberLinks: MemberLink[];
   suggestions: ProposedSuggestion[];
   mergedMembers: FamilyMember[];
@@ -56,16 +56,14 @@ export interface CollaborationHubProps {
   }[];
   loading: boolean;
   error: string | null;
+  schemaMissing: boolean;
   hubFocusId: string | null;
   onFocusChange: (id: string) => void;
-  onSendInvite: (
-    email: string,
-    role: CollaborationRole,
-    branchRootMemberId?: string
-  ) => Promise<{ inviteUrl: string }>;
-  onAcceptInvite: (inviteId: string) => Promise<void>;
-  onDeclineInvite: (inviteId: string) => Promise<void>;
-  onCancelInvite: (inviteId: string) => Promise<void>;
+  onAskToCollab: (targetUserId: string) => Promise<void>;
+  onAcceptCollab: (requestId: string) => Promise<void>;
+  onDeclineCollab: (requestId: string) => Promise<void>;
+  onCancelCollab: (requestId: string) => Promise<void>;
+  onDisconnect: (otherUserId: string) => Promise<void>;
   onLinkMembers: (
     treeAId: string,
     memberAId: string,
@@ -131,12 +129,13 @@ function SuggestionDiff({
 
 export const CollaborationHub: React.FC<CollaborationHubProps> = ({
   ownTreeId,
+  ownUserId,
   ownMembers,
   anchorMemberId,
   heritageMode,
   accessibleTrees,
-  outgoingInvites,
-  incomingInvites,
+  familyDirectory,
+  incomingCollabRequests,
   memberLinks,
   suggestions,
   mergedMembers,
@@ -146,12 +145,14 @@ export const CollaborationHub: React.FC<CollaborationHubProps> = ({
   linkCandidates,
   loading,
   error,
+  schemaMissing,
   hubFocusId,
   onFocusChange,
-  onSendInvite,
-  onAcceptInvite,
-  onDeclineInvite,
-  onCancelInvite,
+  onAskToCollab,
+  onAcceptCollab,
+  onDeclineCollab,
+  onCancelCollab,
+  onDisconnect,
   onLinkMembers,
   onAcceptLink,
   onRejectLink,
@@ -162,20 +163,17 @@ export const CollaborationHub: React.FC<CollaborationHubProps> = ({
   onImportJson,
   userDisplayName = 'Contributor',
 }) => {
-  const [inviteEmail, setInviteEmail] = useState('');
-  const [inviteRole, setInviteRole] = useState<CollaborationRole>('contributor');
-  const [inviteBranch, setInviteBranch] = useState<string>('all');
-  const [inviteCopied, setInviteCopied] = useState(false);
   const [selectedSuggestion, setSelectedSuggestion] = useState<ProposedSuggestion | null>(null);
   const [linkTreeA, setLinkTreeA] = useState(ownTreeId);
   const [linkMemberA, setLinkMemberA] = useState('');
   const [linkTreeB, setLinkTreeB] = useState('');
   const [linkMemberB, setLinkMemberB] = useState('');
   const [hubLayout, setHubLayout] = useState<TreeLayout>('mergedRoots');
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [busyId, setBusyId] = useState<string | null>(null);
   const [suggestBio, setSuggestBio] = useState('');
-  const [suggestTargetTreeId, setSuggestTargetTreeId] = useState('');
-  const [suggestTargetMemberId, setSuggestTargetMemberId] = useState('');
-  const [suggestSending, setSuggestSending] = useState(false);
+  const [suggestTargetKey, setSuggestTargetKey] = useState('');
+  const [showJsonFallback, setShowJsonFallback] = useState(false);
 
   const sourceBadges = useMemo(() => {
     const map: Record<string, string> = {};
@@ -189,50 +187,13 @@ export const CollaborationHub: React.FC<CollaborationHubProps> = ({
   const pendingLinks = memberLinks.filter((l) => l.status === 'pending');
   const pendingSuggestions = suggestions.filter((s) => s.status === 'pending');
   const focusId = hubFocusId || mergedMembers[0]?.id || '';
+  const connectedCount = familyDirectory.filter((d) => d.connectionStatus === 'connected').length;
 
   const membersForSuggestionLookup = useMemo(() => {
     const all: FamilyMember[] = [];
     for (const t of accessibleTrees) all.push(...t.members);
     return all;
   }, [accessibleTrees]);
-
-  const handleInvite = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!inviteEmail.trim()) return;
-    const branch = inviteBranch === 'all' ? undefined : inviteBranch;
-    const { inviteUrl } = await onSendInvite(inviteEmail.trim(), inviteRole, branch);
-    const body = `You're invited to collaborate on our family tree in Kith & Kin.\n\nOpen this link to accept:\n${inviteUrl}`;
-    await navigator.clipboard.writeText(body);
-    setInviteCopied(true);
-    setInviteEmail('');
-    setTimeout(() => setInviteCopied(false), 3000);
-  };
-
-  const handleLinkSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!linkTreeA || !linkMemberA || !linkTreeB || !linkMemberB) return;
-    await onLinkMembers(linkTreeA, linkMemberA, linkTreeB, linkMemberB);
-    setLinkMemberA('');
-    setLinkMemberB('');
-  };
-
-  const handleJsonImport = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file || !onImportJson) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      try {
-        const parsed = JSON.parse(String(reader.result)) as FamilyMember[];
-        if (Array.isArray(parsed)) onImportJson(parsed);
-      } catch {
-        /* ignore invalid json */
-      }
-    };
-    reader.readAsText(file);
-    e.target.value = '';
-  };
-
-  const selectedVirtual = focusId ? virtualById.get(focusId) : null;
 
   const contributorTargets = useMemo(() => {
     const targets: { treeId: string; treeName: string; memberId: string; member: FamilyMember }[] =
@@ -251,177 +212,124 @@ export const CollaborationHub: React.FC<CollaborationHubProps> = ({
     return targets;
   }, [accessibleTrees]);
 
+  const runAction = async (id: string, fn: () => Promise<void>) => {
+    setBusyId(id);
+    setActionError(null);
+    try {
+      await fn();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Something went wrong.');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const handleLinkSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!linkTreeA || !linkMemberA || !linkTreeB || !linkMemberB) return;
+    await runAction('link', () => onLinkMembers(linkTreeA, linkMemberA, linkTreeB, linkMemberB));
+    setLinkMemberA('');
+    setLinkMemberB('');
+  };
+
   const handleSubmitSuggestion = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!suggestTargetTreeId || !suggestTargetMemberId || !suggestBio.trim()) return;
-    const target = contributorTargets.find(
-      (t) => t.treeId === suggestTargetTreeId && t.memberId === suggestTargetMemberId
-    );
+    const [tid, mid] = suggestTargetKey.split(':');
+    if (!tid || !mid || !suggestBio.trim()) return;
+    const target = contributorTargets.find((t) => t.treeId === tid && t.memberId === mid);
     if (!target) return;
-    setSuggestSending(true);
-    try {
-      await onSubmitSuggestion(suggestTargetTreeId, userDisplayName, {
+    await runAction('suggest', () =>
+      onSubmitSuggestion(tid, userDisplayName, {
         type: 'edit_member',
-        memberId: suggestTargetMemberId,
+        memberId: mid,
         description: `Suggested biography update for ${target.member.firstName} ${target.member.lastName}`,
         suggestedData: {
           member: { ...target.member, biography: suggestBio.trim() },
         },
-      });
-      setSuggestBio('');
-      setSuggestTargetMemberId('');
-    } finally {
-      setSuggestSending(false);
-    }
+      })
+    );
+    setSuggestBio('');
+    setSuggestTargetKey('');
   };
+
+  const selectedVirtual = focusId ? virtualById.get(focusId) : null;
+
+  const isOwnerOfSuggestion = (sug: ProposedSuggestion) => sug.treeId === ownTreeId;
+
+  if (schemaMissing) {
+    return (
+      <div className="bg-white border border-amber-200 rounded-2xl p-8 max-w-xl mx-auto space-y-4 text-center">
+        <Database className="w-10 h-10 text-amber-600 mx-auto" />
+        <h2 className="text-xl font-serif font-bold text-[#2D2926]">Collaboration setup needed</h2>
+        <p className="text-sm text-[#5C5652] leading-relaxed">
+          Run the collaboration migration in your Supabase SQL editor:
+        </p>
+        <code className="block text-xs bg-[#FAF9F6] border border-[#E5E1DA] rounded-lg p-3 text-left">
+          supabase/migrations/20260531160000_fix_collaboration.sql
+        </code>
+        <button
+          type="button"
+          onClick={onRefresh}
+          className="px-4 py-2 bg-[#2D2926] text-white rounded-lg text-sm font-semibold"
+        >
+          I ran it — refresh
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div>
-          <h2 className="text-2xl font-serif font-bold text-[#2D2926] flex items-center gap-2">
-            <GitBranch className="w-6 h-6" />
-            Collaboration Hub
-          </h2>
-          <p className="text-sm text-[#7A7570] mt-1 max-w-2xl">
-            Your personal tree stays on the other tabs. Here, trees you can access merge into one
-            expanded family view at link points.
-          </p>
-        </div>
-        {incomingInvites.length > 0 && (
-          <div className="flex items-center gap-2 px-3 py-2 bg-amber-50 border border-amber-200 rounded-lg text-amber-900 text-sm">
-            <Bell className="w-4 h-4 shrink-0" aria-hidden="true" />
-            {incomingInvites.length} pending invite{incomingInvites.length > 1 ? 's' : ''}
-          </div>
-        )}
+      <div>
+        <h2 className="text-2xl font-serif font-bold text-[#2D2926] flex items-center gap-2">
+          <GitBranch className="w-6 h-6" />
+          Collaboration Hub
+        </h2>
+        <p className="text-sm text-[#7A7570] mt-1 max-w-2xl">
+          Connect with family on Kith & Kin, then link the same person across trees to see one
+          expanded family view here.
+        </p>
       </div>
 
-      {error && (
+      {(error || actionError) && (
         <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-red-800 text-sm">
-          {error}
+          {actionError || error}
         </div>
       )}
 
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 items-start">
-        {/* Access panel */}
         <aside className="xl:col-span-3 space-y-4">
-          <section className="bg-white border border-[#E5E1DA] rounded-xl p-4 space-y-3">
-            <h3 className="font-serif font-bold text-[#2D2926] flex items-center gap-2">
-              <Users className="w-4 h-4" /> Trees in this view
-            </h3>
-            {loading ? (
-              <Loader2 className="w-5 h-5 animate-spin text-[#A8A29E]" />
-            ) : (
-              <ul className="space-y-2 text-sm">
-                {accessibleTrees.map((t) => (
-                  <li
-                    key={t.treeId}
-                    className="flex items-center justify-between gap-2 p-2 rounded-lg bg-[#FAF9F6] border border-[#E5E1DA]"
-                  >
-                    <span className="font-medium text-[#2D2926] truncate">
-                      {t.isOwnTree ? 'My tree' : t.ownerName}
-                    </span>
-                    <span className="text-[10px] uppercase font-bold text-[#7A7570] shrink-0">
-                      {t.role}
-                    </span>
-                  </li>
-                ))}
-                {sharedTrees.length === 0 && (
-                  <p className="text-xs text-[#7A7570] italic">
-                    No shared trees yet. Invite a relative below.
-                  </p>
-                )}
-              </ul>
-            )}
-          </section>
-
-          <section className="bg-white border border-[#E5E1DA] rounded-xl p-4 space-y-3">
-            <h3 className="font-serif font-bold text-[#2D2926] flex items-center gap-2">
-              <UserPlus className="w-4 h-4" /> Invite someone
-            </h3>
-            <form onSubmit={handleInvite} className="space-y-3 text-sm">
-              <input
-                type="email"
-                required
-                value={inviteEmail}
-                onChange={(e) => setInviteEmail(e.target.value)}
-                placeholder="Relative's email"
-                className="w-full border border-[#E5E1DA] rounded-lg px-3 py-2"
-              />
-              <select
-                value={inviteRole}
-                onChange={(e) => setInviteRole(e.target.value as CollaborationRole)}
-                className="w-full border border-[#E5E1DA] rounded-lg px-3 py-2"
-              >
-                <option value="viewer">View only</option>
-                <option value="contributor">Suggest changes</option>
-                <option value="editor">Edit branch</option>
-              </select>
-              <select
-                value={inviteBranch}
-                onChange={(e) => setInviteBranch(e.target.value)}
-                className="w-full border border-[#E5E1DA] rounded-lg px-3 py-2"
-              >
-                <option value="all">Entire tree</option>
-                {ownMembers
-                  .filter((m) => m.childrenIds.length > 0)
-                  .map((m) => (
-                    <option key={m.id} value={m.id}>
-                      Branch from {m.firstName} {m.lastName}
-                    </option>
-                  ))}
-              </select>
-              <button
-                type="submit"
-                className="w-full py-2.5 bg-[#2D2926] text-white rounded-lg font-semibold flex items-center justify-center gap-2"
-              >
-                <Share2 className="w-4 h-4" />
-                {inviteCopied ? 'Copied to clipboard!' : 'Send invite link'}
-              </button>
-            </form>
-            {outgoingInvites.length > 0 && (
-              <div className="pt-2 border-t border-[#E5E1DA] space-y-2">
-                <p className="text-[10px] font-bold uppercase text-[#7A7570]">Pending sent</p>
-                {outgoingInvites.map((inv) => (
-                  <div
-                    key={inv.id}
-                    className="flex items-center justify-between text-xs gap-2"
-                  >
-                    <span className="truncate">{inv.inviteeEmail}</span>
-                    <button
-                      type="button"
-                      onClick={() => onCancelInvite(inv.id)}
-                      className="text-red-600 hover:underline shrink-0"
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-          </section>
-
-          {incomingInvites.length > 0 && (
+          {incomingCollabRequests.length > 0 && (
             <section className="bg-amber-50 border border-amber-200 rounded-xl p-4 space-y-3">
-              <h3 className="font-serif font-bold text-amber-900">Invites for you</h3>
-              {incomingInvites.map((inv) => (
-                <div key={inv.id} className="text-sm space-y-2 p-2 bg-white rounded-lg border border-amber-100">
+              <h3 className="font-serif font-bold text-amber-900 flex items-center gap-2">
+                <UserPlus className="w-4 h-4" />
+                Requests for you
+              </h3>
+              {incomingCollabRequests.map((req) => (
+                <div
+                  key={req.id}
+                  className="text-sm space-y-2 p-3 bg-white rounded-lg border border-amber-100"
+                >
                   <p>
-                    <strong>{inv.invitedByName}</strong> invited you to{' '}
-                    <strong>{inv.treeName}</strong> as {inv.role}.
+                    <strong>
+                      {req.requesterFirstName} {req.requesterLastName}
+                    </strong>{' '}
+                    wants to connect trees with you.
                   </p>
                   <div className="flex gap-2">
                     <button
                       type="button"
-                      onClick={() => onAcceptInvite(inv.id)}
-                      className="flex-1 py-1.5 bg-green-700 text-white rounded font-bold text-xs flex items-center justify-center gap-1"
+                      disabled={busyId === req.id}
+                      onClick={() => runAction(req.id, () => onAcceptCollab(req.id))}
+                      className="flex-1 py-2 bg-green-700 text-white rounded-lg font-bold text-xs flex items-center justify-center gap-1 disabled:opacity-50"
                     >
                       <Check className="w-3.5 h-3.5" /> Accept
                     </button>
                     <button
                       type="button"
-                      onClick={() => onDeclineInvite(inv.id)}
-                      className="flex-1 py-1.5 border border-[#E5E1DA] rounded font-bold text-xs"
+                      disabled={busyId === req.id}
+                      onClick={() => runAction(req.id, () => onDeclineCollab(req.id))}
+                      className="flex-1 py-2 border border-[#E5E1DA] rounded-lg font-bold text-xs disabled:opacity-50"
                     >
                       Decline
                     </button>
@@ -433,156 +341,266 @@ export const CollaborationHub: React.FC<CollaborationHubProps> = ({
 
           <section className="bg-white border border-[#E5E1DA] rounded-xl p-4 space-y-3">
             <h3 className="font-serif font-bold text-[#2D2926] flex items-center gap-2">
-              <Link2 className="w-4 h-4" /> Link same person
+              <Users className="w-4 h-4" /> Family on Kith & Kin
             </h3>
-            <p className="text-xs text-[#7A7570]">
-              Connect matching people across trees so branches fold together here.
-            </p>
-            <form onSubmit={handleLinkSubmit} className="space-y-2 text-sm">
-              <select
-                value={linkTreeA}
-                onChange={(e) => {
-                  setLinkTreeA(e.target.value);
-                  setLinkMemberA('');
-                }}
-                className="w-full border border-[#E5E1DA] rounded-lg px-2 py-1.5"
-              >
-                {accessibleTrees.map((t) => (
-                  <option key={t.treeId} value={t.treeId}>
-                    {t.isOwnTree ? 'My tree' : t.ownerName}
-                  </option>
+            {loading ? (
+              <Loader2 className="w-5 h-5 animate-spin text-[#A8A29E]" />
+            ) : familyDirectory.length === 0 ? (
+              <p className="text-sm text-[#7A7570] italic">
+                No other family accounts yet. When relatives sign up, they will appear here.
+              </p>
+            ) : (
+              <ul className="space-y-2">
+                {familyDirectory.map((person) => (
+                  <li
+                    key={person.userId}
+                    className="flex items-center justify-between gap-2 p-2 rounded-lg bg-[#FAF9F6] border border-[#E5E1DA] text-sm"
+                  >
+                    <span className="font-medium text-[#2D2926] truncate">
+                      {person.firstName} {person.lastName}
+                    </span>
+                    {person.connectionStatus === 'connected' && (
+                      <div className="flex items-center gap-1 shrink-0">
+                        <span className="text-[10px] uppercase font-bold text-green-700">Connected</span>
+                        <button
+                          type="button"
+                          onClick={() => runAction(person.userId, () => onDisconnect(person.userId))}
+                          className="text-[10px] text-[#7A7570] hover:text-red-600 underline"
+                        >
+                          Disconnect
+                        </button>
+                      </div>
+                    )}
+                    {person.connectionStatus === 'none' && (
+                      <button
+                        type="button"
+                        disabled={busyId === person.userId}
+                        onClick={() => runAction(person.userId, () => onAskToCollab(person.userId))}
+                        className="shrink-0 px-2 py-1 bg-[#2D2926] text-white rounded text-xs font-semibold disabled:opacity-50"
+                      >
+                        Ask to collab
+                      </button>
+                    )}
+                    {person.connectionStatus === 'pending_out' && person.requestId && (
+                      <button
+                        type="button"
+                        disabled={busyId === person.requestId}
+                        onClick={() =>
+                          runAction(person.requestId!, () => onCancelCollab(person.requestId!))
+                        }
+                        className="shrink-0 text-xs text-[#7A7570] hover:text-red-600 disabled:opacity-50"
+                      >
+                        Waiting… Cancel
+                      </button>
+                    )}
+                    {person.connectionStatus === 'pending_in' && (
+                      <span className="text-[10px] text-amber-700 font-bold shrink-0">See above</span>
+                    )}
+                  </li>
                 ))}
-              </select>
-              <select
-                value={linkMemberA}
-                onChange={(e) => setLinkMemberA(e.target.value)}
-                className="w-full border border-[#E5E1DA] rounded-lg px-2 py-1.5"
-                required
-              >
-                <option value="">Person in first tree…</option>
-                {accessibleTrees
-                  .find((t) => t.treeId === linkTreeA)
-                  ?.members.map((m) => (
-                    <option key={m.id} value={m.id}>
-                      {m.firstName} {m.lastName}
-                    </option>
-                  ))}
-              </select>
-              <select
-                value={linkTreeB}
-                onChange={(e) => {
-                  setLinkTreeB(e.target.value);
-                  setLinkMemberB('');
-                }}
-                className="w-full border border-[#E5E1DA] rounded-lg px-2 py-1.5"
-                required
-              >
-                <option value="">Second tree…</option>
-                {accessibleTrees
-                  .filter((t) => t.treeId !== linkTreeA)
-                  .map((t) => (
+              </ul>
+            )}
+          </section>
+
+          {connectedCount > 0 && (
+            <section className="bg-white border border-[#E5E1DA] rounded-xl p-4 space-y-2">
+              <h3 className="font-serif font-bold text-[#2D2926] text-sm">Trees in this view</h3>
+              <ul className="space-y-1 text-sm">
+                {accessibleTrees.map((t) => (
+                  <li key={t.treeId} className="text-[#5C5652]">
+                    {t.isOwnTree ? 'My tree' : `${t.ownerName}'s tree`}
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+
+          {sharedTrees.length > 0 && (
+            <section className="bg-white border border-[#E5E1DA] rounded-xl p-4 space-y-3">
+              <h3 className="font-serif font-bold text-[#2D2926] flex items-center gap-2 text-sm">
+                <Link2 className="w-4 h-4" /> Link same person
+              </h3>
+              <p className="text-xs text-[#7A7570]">
+                Connect matching people so branches fold together in the merged tree.
+              </p>
+              <form onSubmit={handleLinkSubmit} className="space-y-2 text-sm">
+                <select
+                  value={linkTreeA}
+                  onChange={(e) => {
+                    setLinkTreeA(e.target.value);
+                    setLinkMemberA('');
+                  }}
+                  className="w-full border border-[#E5E1DA] rounded-lg px-2 py-1.5"
+                >
+                  {accessibleTrees.map((t) => (
                     <option key={t.treeId} value={t.treeId}>
                       {t.isOwnTree ? 'My tree' : t.ownerName}
                     </option>
                   ))}
-              </select>
-              <select
-                value={linkMemberB}
-                onChange={(e) => setLinkMemberB(e.target.value)}
-                className="w-full border border-[#E5E1DA] rounded-lg px-2 py-1.5"
-                required
-              >
-                <option value="">Person in second tree…</option>
-                {accessibleTrees
-                  .find((t) => t.treeId === linkTreeB)
-                  ?.members.map((m) => (
-                    <option key={m.id} value={m.id}>
-                      {m.firstName} {m.lastName}
-                    </option>
+                </select>
+                <select
+                  value={linkMemberA}
+                  onChange={(e) => setLinkMemberA(e.target.value)}
+                  className="w-full border border-[#E5E1DA] rounded-lg px-2 py-1.5"
+                  required
+                >
+                  <option value="">Person in first tree…</option>
+                  {accessibleTrees
+                    .find((t) => t.treeId === linkTreeA)
+                    ?.members.map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.firstName} {m.lastName}
+                      </option>
+                    ))}
+                </select>
+                <select
+                  value={linkTreeB}
+                  onChange={(e) => {
+                    setLinkTreeB(e.target.value);
+                    setLinkMemberB('');
+                  }}
+                  className="w-full border border-[#E5E1DA] rounded-lg px-2 py-1.5"
+                  required
+                >
+                  <option value="">Second tree…</option>
+                  {accessibleTrees
+                    .filter((t) => t.treeId !== linkTreeA)
+                    .map((t) => (
+                      <option key={t.treeId} value={t.treeId}>
+                        {t.isOwnTree ? 'My tree' : t.ownerName}
+                      </option>
+                    ))}
+                </select>
+                <select
+                  value={linkMemberB}
+                  onChange={(e) => setLinkMemberB(e.target.value)}
+                  className="w-full border border-[#E5E1DA] rounded-lg px-2 py-1.5"
+                  required
+                >
+                  <option value="">Person in second tree…</option>
+                  {accessibleTrees
+                    .find((t) => t.treeId === linkTreeB)
+                    ?.members.map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.firstName} {m.lastName}
+                      </option>
+                    ))}
+                </select>
+                <button
+                  type="submit"
+                  disabled={busyId === 'link'}
+                  className="w-full py-2 bg-[#2D2926] text-white rounded-lg text-sm font-semibold disabled:opacity-50"
+                >
+                  Request link
+                </button>
+              </form>
+
+              {linkCandidates.length > 0 && (
+                <div className="pt-2 border-t border-[#E5E1DA] space-y-2">
+                  <p className="text-[10px] font-bold uppercase text-[#7A7570]">Suggested matches</p>
+                  {linkCandidates.slice(0, 5).map((c, i) => (
+                    <button
+                      key={i}
+                      type="button"
+                      onClick={() =>
+                        runAction(`cand-${i}`, () =>
+                          onLinkMembers(c.treeAId, c.memberAId, c.treeBId, c.memberBId)
+                        )
+                      }
+                      className="w-full text-left text-xs p-2 rounded border border-indigo-100 bg-indigo-50/50 hover:bg-indigo-50"
+                    >
+                      Is <strong>{c.label}</strong> the same person?
+                    </button>
                   ))}
-              </select>
-              <button
-                type="submit"
-                className="w-full py-2 bg-[#2D2926] text-white rounded-lg text-sm font-semibold"
-              >
-                Request link
-              </button>
-            </form>
+                </div>
+              )}
 
-            {linkCandidates.length > 0 && (
-              <div className="pt-2 border-t border-[#E5E1DA] space-y-2">
-                <p className="text-[10px] font-bold uppercase text-[#7A7570]">Suggested matches</p>
-                {linkCandidates.slice(0, 5).map((c, i) => (
-                  <button
-                    key={i}
-                    type="button"
-                    onClick={() =>
-                      onLinkMembers(c.treeAId, c.memberAId, c.treeBId, c.memberBId)
-                    }
-                    className="w-full text-left text-xs p-2 rounded border border-indigo-100 bg-indigo-50/50 hover:bg-indigo-50"
-                  >
-                    Is <strong>{c.label}</strong> the same person?
-                  </button>
-                ))}
-              </div>
-            )}
-
-            {pendingLinks.length > 0 && (
-              <div className="space-y-2 pt-2">
-                <p className="text-[10px] font-bold uppercase text-[#7A7570]">Pending links</p>
-                {pendingLinks.map((link) => (
-                  <div key={link.id} className="flex gap-2 text-xs">
-                    <button
-                      type="button"
-                      onClick={() => onAcceptLink(link.id)}
-                      className="flex-1 py-1 bg-green-700 text-white rounded"
-                    >
-                      Accept
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => onRejectLink(link.id)}
-                      className="flex-1 py-1 border rounded"
-                    >
-                      Reject
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-          </section>
+              {pendingLinks.length > 0 && (
+                <div className="space-y-2 pt-2">
+                  <p className="text-[10px] font-bold uppercase text-[#7A7570]">Pending links</p>
+                  {pendingLinks.map((link) => (
+                    <div key={link.id} className="flex gap-2 text-xs">
+                      <button
+                        type="button"
+                        onClick={() => runAction(link.id, () => onAcceptLink(link.id))}
+                        className="flex-1 py-1 bg-green-700 text-white rounded disabled:opacity-50"
+                      >
+                        Accept
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => runAction(link.id, () => onRejectLink(link.id))}
+                        className="flex-1 py-1 border rounded disabled:opacity-50"
+                      >
+                        Reject
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
+          )}
 
           {onImportJson && (
             <section className="bg-[#FAF9F6] border border-[#E5E1DA] rounded-xl p-4 space-y-2">
-              <h3 className="text-sm font-bold text-[#2D2926] flex items-center gap-2">
-                <FileUp className="w-4 h-4" /> Import branch (fallback)
-              </h3>
-              <p className="text-xs text-[#7A7570]">
-                For relatives not on the app yet — import their JSON export into your tree, then
-                link the shared person.
-              </p>
-              <label className="block">
-                <span className="sr-only">Import JSON</span>
-                <input
-                  type="file"
-                  accept=".json,application/json"
-                  onChange={handleJsonImport}
-                  className="text-xs w-full"
-                />
-              </label>
               <button
                 type="button"
-                onClick={() => downloadFamilyJson(ownMembers, 'my_tree_export.json')}
-                className="text-xs text-[#2D2926] underline"
+                onClick={() => setShowJsonFallback((v) => !v)}
+                className="text-sm font-bold text-[#7A7570] hover:text-[#2D2926]"
               >
-                Download my tree JSON instead
+                {showJsonFallback ? 'Hide' : 'Show'} JSON import fallback
               </button>
+              {showJsonFallback && (
+                <>
+                  <p className="text-xs text-[#7A7570]">
+                    For relatives not on the app — import their export, then link the shared person.
+                  </p>
+                  <input
+                    type="file"
+                    accept=".json,application/json"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (!file) return;
+                      const reader = new FileReader();
+                      reader.onload = () => {
+                        try {
+                          const parsed = JSON.parse(String(reader.result)) as FamilyMember[];
+                          if (Array.isArray(parsed)) onImportJson(parsed);
+                        } catch {
+                          /* ignore */
+                        }
+                      };
+                      reader.readAsText(file);
+                      e.target.value = '';
+                    }}
+                    className="text-xs w-full"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => downloadFamilyJson(ownMembers, 'my_tree_export.json')}
+                    className="text-xs text-[#2D2926] underline"
+                  >
+                    Download my tree JSON
+                  </button>
+                </>
+              )}
             </section>
           )}
         </aside>
 
-        {/* Merged tree */}
         <div className="xl:col-span-9 space-y-4">
+          {connectedCount === 0 && !loading && (
+            <div className="bg-[#FAF9F6] border border-[#E5E1DA] rounded-xl p-4 text-sm text-[#5C5652] space-y-2">
+              <p className="font-semibold text-[#2D2926]">How to expand your family tree here</p>
+              <ol className="list-decimal list-inside space-y-1">
+                <li>Find a relative in the list and tap <strong>Ask to collab</strong></li>
+                <li>They accept your request (or accept theirs)</li>
+                <li>Link the same person across both trees</li>
+                <li>See the merged family tree below</li>
+              </ol>
+            </div>
+          )}
+
           {selectedVirtual && (
             <div className="bg-white border border-[#E5E1DA] rounded-xl p-4 text-sm">
               <p className="text-[10px] font-bold uppercase text-[#7A7570] mb-2">Combined details</p>
@@ -593,7 +611,6 @@ export const CollaborationHub: React.FC<CollaborationHubProps> = ({
                     className="text-[10px] px-2 py-0.5 rounded bg-indigo-50 border border-indigo-200 text-indigo-800"
                   >
                     From {s.treeName}
-                    {!selectedVirtual.isEditable && s.role === 'viewer' ? ' (read-only)' : ''}
                   </span>
                 ))}
               </div>
@@ -633,28 +650,19 @@ export const CollaborationHub: React.FC<CollaborationHubProps> = ({
           ) : (
             <div className="border-2 border-dashed border-[#E5E1DA] rounded-2xl p-12 text-center text-[#7A7570]">
               <Users className="w-10 h-10 mx-auto mb-3 text-[#A8A29E]" />
-              <p>Add people to your tree or accept an invite to see the expanded family view here.</p>
+              <p>Connect with a relative to see your expanded family tree here.</p>
             </div>
           )}
         </div>
       </div>
 
-      {/* Suggestions queue */}
       {contributorTargets.length > 0 && (
         <section className="bg-indigo-50 border border-indigo-200 rounded-xl p-5 space-y-3">
           <h3 className="font-serif font-bold text-indigo-900">Propose a change</h3>
-          <p className="text-sm text-indigo-800">
-            You can suggest edits to trees shared with you. The owner reviews and approves them
-            below.
-          </p>
           <form onSubmit={handleSubmitSuggestion} className="grid sm:grid-cols-2 gap-3 text-sm">
             <select
-              value={suggestTargetMemberId ? `${suggestTargetTreeId}:${suggestTargetMemberId}` : ''}
-              onChange={(e) => {
-                const [tid, mid] = e.target.value.split(':');
-                setSuggestTargetTreeId(tid);
-                setSuggestTargetMemberId(mid);
-              }}
+              value={suggestTargetKey}
+              onChange={(e) => setSuggestTargetKey(e.target.value)}
               className="border border-indigo-200 rounded-lg px-3 py-2 bg-white"
               required
             >
@@ -674,10 +682,10 @@ export const CollaborationHub: React.FC<CollaborationHubProps> = ({
             />
             <button
               type="submit"
-              disabled={suggestSending}
+              disabled={busyId === 'suggest'}
               className="sm:col-span-2 py-2.5 bg-indigo-700 text-white rounded-lg font-semibold disabled:opacity-50"
             >
-              {suggestSending ? 'Sending…' : 'Submit suggestion'}
+              Submit suggestion
             </button>
           </form>
         </section>
@@ -693,19 +701,14 @@ export const CollaborationHub: React.FC<CollaborationHubProps> = ({
               </span>
             )}
           </h3>
-          <button
-            type="button"
-            onClick={onRefresh}
-            className="text-xs text-[#7A7570] hover:text-[#2D2926]"
-          >
+          <button type="button" onClick={onRefresh} className="text-xs text-[#7A7570] hover:text-[#2D2926]">
             Refresh
           </button>
         </div>
 
         {suggestions.length === 0 ? (
-          <p className="text-sm text-[#7A7570] italic text-center py-6">
-            Contributors can propose changes to trees they access. You approve them here — edits
-            apply to the owning tree.
+          <p className="text-sm text-[#7A7570] italic text-center py-4">
+            Contributors can propose changes to trees they access. You approve them here.
           </p>
         ) : (
           <div className="space-y-3 max-h-80 overflow-y-auto">
@@ -713,20 +716,14 @@ export const CollaborationHub: React.FC<CollaborationHubProps> = ({
               <div
                 key={sug.id}
                 className={`border rounded-xl p-4 text-sm ${
-                  sug.status === 'pending'
-                    ? 'border-amber-200 bg-amber-50/20'
-                    : 'border-[#E5E1DA]'
+                  sug.status === 'pending' ? 'border-amber-200 bg-amber-50/20' : 'border-[#E5E1DA]'
                 }`}
               >
                 <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
                   <span className="font-bold">{sug.description}</span>
-                  <span className="text-[10px] uppercase font-bold text-[#7A7570]">
-                    {sug.status}
-                  </span>
+                  <span className="text-[10px] uppercase font-bold text-[#7A7570]">{sug.status}</span>
                 </div>
-                <p className="text-xs text-[#7A7570]">
-                  By {sug.author} · {sug.type.replace('_', ' ')}
-                </p>
+                <p className="text-xs text-[#7A7570]">By {sug.author}</p>
                 <div className="flex gap-2 mt-3">
                   <button
                     type="button"
@@ -735,19 +732,19 @@ export const CollaborationHub: React.FC<CollaborationHubProps> = ({
                   >
                     <Eye className="w-3.5 h-3.5" /> Review
                   </button>
-                  {sug.status === 'pending' && (
+                  {sug.status === 'pending' && isOwnerOfSuggestion(sug) && (
                     <>
                       <button
                         type="button"
-                        onClick={() => onApproveSuggestion(sug)}
-                        className="px-3 py-1.5 bg-green-700 text-white rounded text-xs font-bold flex items-center gap-1"
+                        onClick={() => runAction(sug.id, () => onApproveSuggestion(sug))}
+                        className="px-3 py-1.5 bg-green-700 text-white rounded text-xs font-bold disabled:opacity-50"
                       >
-                        <Check className="w-3.5 h-3.5" /> Approve
+                        Approve
                       </button>
                       <button
                         type="button"
-                        onClick={() => onRejectSuggestion(sug.id)}
-                        className="px-3 py-1.5 border border-red-200 text-red-700 rounded text-xs font-bold"
+                        onClick={() => runAction(sug.id, () => onRejectSuggestion(sug.id))}
+                        className="px-3 py-1.5 border border-red-200 text-red-700 rounded text-xs font-bold disabled:opacity-50"
                       >
                         Decline
                       </button>
@@ -769,14 +766,13 @@ export const CollaborationHub: React.FC<CollaborationHubProps> = ({
                 <X className="w-5 h-5" />
               </button>
             </div>
-            <p className="text-sm">{selectedSuggestion.description}</p>
             <SuggestionDiff sug={selectedSuggestion} members={membersForSuggestionLookup} />
-            {selectedSuggestion.status === 'pending' && (
+            {selectedSuggestion.status === 'pending' && isOwnerOfSuggestion(selectedSuggestion) && (
               <div className="flex gap-2 justify-end">
                 <button
                   type="button"
                   onClick={() => {
-                    onRejectSuggestion(selectedSuggestion.id);
+                    runAction(selectedSuggestion.id, () => onRejectSuggestion(selectedSuggestion.id));
                     setSelectedSuggestion(null);
                   }}
                   className="px-4 py-2 border rounded text-sm"
@@ -785,9 +781,11 @@ export const CollaborationHub: React.FC<CollaborationHubProps> = ({
                 </button>
                 <button
                   type="button"
-                  onClick={async () => {
-                    await onApproveSuggestion(selectedSuggestion);
-                    setSelectedSuggestion(null);
+                  onClick={() => {
+                    runAction(selectedSuggestion.id, async () => {
+                      await onApproveSuggestion(selectedSuggestion);
+                      setSelectedSuggestion(null);
+                    });
                   }}
                   className="px-4 py-2 bg-green-700 text-white rounded text-sm font-bold"
                 >

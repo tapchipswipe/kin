@@ -6,27 +6,28 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   AccessibleTree,
+  CollabRequest,
   FamilyMember,
+  FamilyDirectoryEntry,
   MemberLink,
   ProposedSuggestion,
-  TreeInvite,
   VirtualMember,
 } from '../types';
 import {
-  acceptInviteByToken,
-  acceptTreeInvite,
+  acceptCollabRequest,
   approveSuggestionById,
+  cancelCollabRequest,
   createMemberLink,
   createSuggestion,
-  createTreeInvite,
-  declineTreeInvite,
+  declineCollabRequest,
+  disconnectCollab,
+  isCollaborationSchemaError,
   loadAccessibleTrees,
-  loadIncomingInvites,
+  loadFamilyDirectory,
+  loadIncomingCollabRequests,
   loadMemberLinks,
-  loadOutgoingInvites,
   loadSuggestionsForTrees,
-  revokeMembership,
-  revokeTreeInvite,
+  sendCollabRequest,
   suggestLinkCandidates,
   updateMemberLinkStatus,
   updateSuggestionStatus,
@@ -37,62 +38,51 @@ export function useCollaborationStore(
   userId: string | undefined,
   ownTreeId: string | undefined,
   ownMembers: FamilyMember[],
-  anchorMemberId: string | null,
-  userEmail: string | undefined
+  anchorMemberId: string | null
 ) {
   const [accessibleTrees, setAccessibleTrees] = useState<AccessibleTree[]>([]);
-  const [outgoingInvites, setOutgoingInvites] = useState<TreeInvite[]>([]);
-  const [incomingInvites, setIncomingInvites] = useState<TreeInvite[]>([]);
+  const [familyDirectory, setFamilyDirectory] = useState<FamilyDirectoryEntry[]>([]);
+  const [incomingCollabRequests, setIncomingCollabRequests] = useState<CollabRequest[]>([]);
   const [memberLinks, setMemberLinks] = useState<MemberLink[]>([]);
   const [suggestions, setSuggestions] = useState<ProposedSuggestion[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [schemaMissing, setSchemaMissing] = useState(false);
   const [hubFocusId, setHubFocusId] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     if (!userId || !ownTreeId) return;
     setLoading(true);
     setError(null);
+    setSchemaMissing(false);
     try {
-      const [trees, outInv, inInv, links] = await Promise.all([
+      const [trees, directory, incoming, links] = await Promise.all([
         loadAccessibleTrees(userId, ownTreeId, ownMembers),
-        loadOutgoingInvites(ownTreeId),
-        userEmail ? loadIncomingInvites(userEmail) : Promise.resolve([]),
+        loadFamilyDirectory(userId),
+        loadIncomingCollabRequests(userId),
         loadMemberLinks(userId),
       ]);
       setAccessibleTrees(trees);
-      setOutgoingInvites(outInv);
-      setIncomingInvites(inInv);
+      setFamilyDirectory(directory);
+      setIncomingCollabRequests(incoming);
       setMemberLinks(links);
 
       const treeIds = trees.map((t) => t.treeId);
       const sug = await loadSuggestionsForTrees(treeIds);
       setSuggestions(sug);
     } catch (e) {
+      if (isCollaborationSchemaError(e)) {
+        setSchemaMissing(true);
+      }
       setError(e instanceof Error ? e.message : 'Failed to load collaboration data');
     } finally {
       setLoading(false);
     }
-  }, [userId, ownTreeId, ownMembers, userEmail]);
+  }, [userId, ownTreeId, ownMembers]);
 
   useEffect(() => {
     refresh();
   }, [refresh]);
-
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const token = params.get('invite');
-    if (!token || !userId) return;
-
-    acceptInviteByToken(token, userId)
-      .then(() => {
-        params.delete('invite');
-        const qs = params.toString();
-        window.history.replaceState({}, '', qs ? `?${qs}` : window.location.pathname);
-        refresh();
-      })
-      .catch(() => {});
-  }, [userId, refresh]);
 
   const mergeResult = useMemo(() => {
     if (!userId || !ownTreeId || accessibleTrees.length === 0) {
@@ -126,30 +116,28 @@ export function useCollaborationStore(
     }
   }, [mergedMembers, mergeResult.virtualMembers, hubFocusId]);
 
-  const sendInvite = async (
-    email: string,
-    role: 'viewer' | 'contributor' | 'editor',
-    branchRootMemberId?: string
-  ) => {
-    if (!ownTreeId) throw new Error('No tree');
-    const result = await createTreeInvite(ownTreeId, email, role, branchRootMemberId);
-    await refresh();
-    return result;
-  };
-
-  const acceptInvite = async (inviteId: string) => {
-    if (!userId) return;
-    await acceptTreeInvite(inviteId, userId);
+  const askToCollab = async (targetUserId: string) => {
+    await sendCollabRequest(targetUserId);
     await refresh();
   };
 
-  const declineInvite = async (inviteId: string) => {
-    await declineTreeInvite(inviteId);
+  const acceptCollab = async (requestId: string) => {
+    await acceptCollabRequest(requestId);
     await refresh();
   };
 
-  const cancelInvite = async (inviteId: string) => {
-    await revokeTreeInvite(inviteId);
+  const declineCollab = async (requestId: string) => {
+    await declineCollabRequest(requestId);
+    await refresh();
+  };
+
+  const cancelCollab = async (requestId: string) => {
+    await cancelCollabRequest(requestId);
+    await refresh();
+  };
+
+  const disconnectFromUser = async (otherUserId: string) => {
+    await disconnectCollab(otherUserId);
     await refresh();
   };
 
@@ -192,11 +180,6 @@ export function useCollaborationStore(
     await refresh();
   };
 
-  const removeMemberAccess = async (treeId: string, memberUserId: string) => {
-    await revokeMembership(treeId, memberUserId);
-    await refresh();
-  };
-
   const virtualById = useMemo(
     () => new Map(mergeResult.virtualMembers.map((v) => [v.virtualId, v])),
     [mergeResult.virtualMembers]
@@ -204,12 +187,13 @@ export function useCollaborationStore(
 
   return {
     accessibleTrees,
-    outgoingInvites,
-    incomingInvites,
+    familyDirectory,
+    incomingCollabRequests,
     memberLinks,
     suggestions,
     loading,
     error,
+    schemaMissing,
     refresh,
     mergedMembers,
     virtualMembers: mergeResult.virtualMembers,
@@ -218,16 +202,16 @@ export function useCollaborationStore(
     linkCandidates,
     hubFocusId,
     setHubFocusId,
-    sendInvite,
-    acceptInvite,
-    declineInvite,
-    cancelInvite,
+    askToCollab,
+    acceptCollab,
+    declineCollab,
+    cancelCollab,
+    disconnectFromUser,
     linkMembers,
     acceptLink,
     rejectLink,
     submitSuggestion,
     approveSuggestion,
     rejectSuggestion,
-    removeMemberAccess,
   };
 }

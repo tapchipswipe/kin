@@ -5,7 +5,9 @@
 
 import {
   AccessibleTree,
+  CollabRequest,
   CollaborationRole,
+  FamilyDirectoryEntry,
   FamilyMember,
   MemberLink,
   ProposedSuggestion,
@@ -16,19 +18,42 @@ import { supabase } from './supabase';
 
 function errMsg(error: unknown): string {
   if (error && typeof error === 'object' && 'message' in error) {
-    return String((error as { message: string }).message);
+    const message = String((error as { message: string }).message);
+    if (message.includes('Could not find the table') || message.includes('schema cache')) {
+      return 'Collaboration is not set up yet. Run supabase/migrations/20260531160000_fix_collaboration.sql in your Supabase SQL editor, then refresh.';
+    }
+    return message;
   }
   if (error instanceof Error) return error.message;
   return 'Request failed';
 }
 
+export function isCollaborationSchemaError(error: unknown): boolean {
+  const msg = errMsg(error);
+  return msg.includes('schema cache') || msg.includes('Could not find the table') || msg.includes('Collaboration is not set up');
+}
+
+function formatProfileName(row: {
+  first_name?: string | null;
+  last_name?: string | null;
+  display_name?: string | null;
+}): string {
+  const first = row.first_name?.trim();
+  const last = row.last_name?.trim();
+  if (first && last) return `${first} ${last}`;
+  if (first) return first;
+  if (last) return last;
+  return row.display_name?.trim() || 'Family member';
+}
+
 async function profileName(userId: string): Promise<string> {
   const { data } = await supabase
     .from('profiles')
-    .select('display_name')
+    .select('first_name, last_name, display_name')
     .eq('id', userId)
     .maybeSingle();
-  return data?.display_name || 'Family member';
+  if (!data) return 'Family member';
+  return formatProfileName(data);
 }
 
 export async function loadAccessibleTrees(
@@ -466,4 +491,162 @@ export async function acceptInviteByToken(token: string, userId: string): Promis
   if (error) throw new Error(errMsg(error));
   if (!invite) throw new Error('Invite not found or expired');
   await acceptTreeInvite(invite.id, userId);
+}
+
+export async function loadFamilyDirectory(userId: string): Promise<FamilyDirectoryEntry[]> {
+  const [profilesResult, requestsResult, membershipsResult] = await Promise.all([
+    supabase
+      .from('profiles')
+      .select('id, first_name, last_name, display_name')
+      .neq('id', userId)
+      .order('last_name', { ascending: true })
+      .order('first_name', { ascending: true }),
+    supabase
+      .from('collab_requests')
+      .select('id, requester_id, target_user_id, status')
+      .or(`requester_id.eq.${userId},target_user_id.eq.${userId}`)
+      .in('status', ['pending', 'accepted']),
+    supabase
+      .from('tree_memberships')
+      .select('trees(owner_id)')
+      .eq('user_id', userId),
+  ]);
+
+  if (profilesResult.error) throw new Error(errMsg(profilesResult.error));
+  if (requestsResult.error) throw new Error(errMsg(requestsResult.error));
+  if (membershipsResult.error) throw new Error(errMsg(membershipsResult.error));
+
+  const connectedOwnerIds = new Set<string>();
+  for (const row of membershipsResult.data ?? []) {
+    const ownerId = (row.trees as { owner_id: string } | null)?.owner_id;
+    if (ownerId) connectedOwnerIds.add(ownerId);
+  }
+
+  const pendingByUser = new Map<string, { id: string; direction: 'out' | 'in' }>();
+  for (const req of requestsResult.data ?? []) {
+    if (req.status !== 'pending') continue;
+    if (req.requester_id === userId) {
+      pendingByUser.set(req.target_user_id, { id: req.id, direction: 'out' });
+    } else if (req.target_user_id === userId) {
+      pendingByUser.set(req.requester_id, { id: req.id, direction: 'in' });
+    }
+  }
+
+  return (profilesResult.data ?? []).map((p) => {
+    let connectionStatus: FamilyDirectoryEntry['connectionStatus'] = 'none';
+    let requestId: string | undefined;
+
+    if (connectedOwnerIds.has(p.id)) {
+      connectionStatus = 'connected';
+    } else {
+      const pending = pendingByUser.get(p.id);
+      if (pending) {
+        connectionStatus = pending.direction === 'out' ? 'pending_out' : 'pending_in';
+        requestId = pending.id;
+      }
+    }
+
+    const firstName = p.first_name?.trim() || p.display_name?.split(' ')[0] || 'Family';
+    const lastName =
+      p.last_name?.trim() ||
+      (p.display_name?.includes(' ')
+        ? p.display_name.slice(p.display_name.indexOf(' ') + 1)
+        : 'Member');
+
+    return {
+      userId: p.id,
+      firstName,
+      lastName,
+      connectionStatus,
+      requestId,
+    };
+  });
+}
+
+export async function loadIncomingCollabRequests(userId: string): Promise<CollabRequest[]> {
+  const { data, error } = await supabase
+    .from('collab_requests')
+    .select('id, requester_id, target_user_id, status, created_at')
+    .eq('target_user_id', userId)
+    .eq('status', 'pending')
+    .order('created_at', { ascending: false });
+
+  if (error) throw new Error(errMsg(error));
+
+  const requesterIds = [...new Set((data ?? []).map((r) => r.requester_id))];
+  const nameMap = new Map<string, { first: string; last: string }>();
+
+  if (requesterIds.length > 0) {
+    const { data: profiles } = await supabase
+      .from('profiles')
+      .select('id, first_name, last_name, display_name')
+      .in('id', requesterIds);
+    for (const p of profiles ?? []) {
+      nameMap.set(p.id, {
+        first: p.first_name?.trim() || p.display_name?.split(' ')[0] || 'Someone',
+        last:
+          p.last_name?.trim() ||
+          (p.display_name?.includes(' ')
+            ? p.display_name.slice(p.display_name.indexOf(' ') + 1)
+            : ''),
+      });
+    }
+  }
+
+  return (data ?? []).map((row) => {
+    const names = nameMap.get(row.requester_id);
+    return {
+      id: row.id,
+      requesterId: row.requester_id,
+      requesterFirstName: names?.first ?? 'Someone',
+      requesterLastName: names?.last ?? '',
+      targetUserId: row.target_user_id,
+      status: row.status,
+      createdAt: row.created_at,
+    };
+  });
+}
+
+export async function sendCollabRequest(targetUserId: string): Promise<void> {
+  const { data: userData } = await supabase.auth.getUser();
+  const requesterId = userData.user?.id;
+  if (!requesterId) throw new Error('Not signed in');
+  if (requesterId === targetUserId) throw new Error('Cannot connect with yourself');
+
+  const { error } = await supabase.from('collab_requests').insert({
+    requester_id: requesterId,
+    target_user_id: targetUserId,
+  });
+
+  if (error) throw new Error(errMsg(error));
+}
+
+export async function acceptCollabRequest(requestId: string): Promise<void> {
+  const { error } = await supabase.rpc('accept_collab_request', {
+    p_request_id: requestId,
+  });
+  if (error) throw new Error(errMsg(error));
+}
+
+export async function declineCollabRequest(requestId: string): Promise<void> {
+  const { error } = await supabase
+    .from('collab_requests')
+    .update({ status: 'declined' })
+    .eq('id', requestId);
+  if (error) throw new Error(errMsg(error));
+}
+
+export async function cancelCollabRequest(requestId: string): Promise<void> {
+  const { error } = await supabase
+    .from('collab_requests')
+    .update({ status: 'cancelled' })
+    .eq('id', requestId);
+  if (error) throw new Error(errMsg(error));
+}
+
+export async function disconnectCollab(otherUserId: string): Promise<void> {
+  const { error } = await supabase.rpc('disconnect_collab', {
+    p_other_user_id: otherUserId,
+  });
+  if (error) throw new Error(errMsg(error));
 }
