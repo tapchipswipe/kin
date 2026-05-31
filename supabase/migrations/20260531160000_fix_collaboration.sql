@@ -135,26 +135,85 @@ CREATE UNIQUE INDEX IF NOT EXISTS collab_requests_pending_pair_idx
 
 ALTER TABLE public.collab_requests ENABLE ROW LEVEL SECURITY;
 
+-- RLS helpers (SECURITY DEFINER avoids trees <-> tree_memberships recursion)
+CREATE OR REPLACE FUNCTION public.is_tree_owner(p_tree_id uuid)
+RETURNS boolean
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM public.trees
+    WHERE id = p_tree_id AND owner_id = auth.uid()
+  );
+$$;
+
+CREATE OR REPLACE FUNCTION public.has_tree_membership(
+  p_tree_id uuid,
+  p_user_id uuid DEFAULT auth.uid()
+)
+RETURNS boolean
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM public.tree_memberships
+    WHERE tree_id = p_tree_id AND user_id = p_user_id
+  );
+$$;
+
+CREATE OR REPLACE FUNCTION public.has_tree_membership_role(
+  p_tree_id uuid,
+  p_roles public.collaboration_role[],
+  p_user_id uuid DEFAULT auth.uid()
+)
+RETURNS boolean
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM public.tree_memberships
+    WHERE tree_id = p_tree_id
+      AND user_id = p_user_id
+      AND role = ANY (p_roles)
+  );
+$$;
+
+GRANT EXECUTE ON FUNCTION public.is_tree_owner(uuid) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.has_tree_membership(uuid, uuid) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.has_tree_membership_role(uuid, public.collaboration_role[], uuid) TO authenticated;
+
 -- Drop broken policies if re-running, then recreate
 DROP POLICY IF EXISTS "Owners manage tree memberships" ON public.tree_memberships;
+DROP POLICY IF EXISTS "Owners can view tree memberships" ON public.tree_memberships;
+DROP POLICY IF EXISTS "Owners insert tree memberships" ON public.tree_memberships;
+DROP POLICY IF EXISTS "Owners update tree memberships" ON public.tree_memberships;
+DROP POLICY IF EXISTS "Owners delete tree memberships" ON public.tree_memberships;
 DROP POLICY IF EXISTS "Members can view own memberships" ON public.tree_memberships;
 DROP POLICY IF EXISTS "Invitees can join via accepted invite" ON public.tree_memberships;
 DROP POLICY IF EXISTS "Membership via collab accept" ON public.tree_memberships;
 
-CREATE POLICY "Owners manage tree memberships"
-  ON public.tree_memberships FOR ALL
-  USING (
-    EXISTS (
-      SELECT 1 FROM public.trees
-      WHERE trees.id = tree_memberships.tree_id AND trees.owner_id = auth.uid()
-    )
-  )
-  WITH CHECK (
-    EXISTS (
-      SELECT 1 FROM public.trees
-      WHERE trees.id = tree_memberships.tree_id AND trees.owner_id = auth.uid()
-    )
-  );
+CREATE POLICY "Owners can view tree memberships"
+  ON public.tree_memberships FOR SELECT
+  USING (public.is_tree_owner(tree_id));
+
+CREATE POLICY "Owners insert tree memberships"
+  ON public.tree_memberships FOR INSERT
+  WITH CHECK (public.is_tree_owner(tree_id));
+
+CREATE POLICY "Owners update tree memberships"
+  ON public.tree_memberships FOR UPDATE
+  USING (public.is_tree_owner(tree_id))
+  WITH CHECK (public.is_tree_owner(tree_id));
+
+CREATE POLICY "Owners delete tree memberships"
+  ON public.tree_memberships FOR DELETE
+  USING (public.is_tree_owner(tree_id));
 
 CREATE POLICY "Members can view own memberships"
   ON public.tree_memberships FOR SELECT
@@ -216,17 +275,10 @@ DROP POLICY IF EXISTS "Link participants can update member links" ON public.memb
 CREATE POLICY "Users can view links involving accessible trees"
   ON public.member_links FOR SELECT
   USING (
-    EXISTS (
-      SELECT 1 FROM public.trees t
-      WHERE (t.id = member_links.tree_a_id OR t.id = member_links.tree_b_id)
-        AND (
-          t.owner_id = auth.uid()
-          OR EXISTS (
-            SELECT 1 FROM public.tree_memberships tm
-            WHERE tm.tree_id = t.id AND tm.user_id = auth.uid()
-          )
-        )
-    )
+    public.is_tree_owner(tree_a_id)
+    OR public.is_tree_owner(tree_b_id)
+    OR public.has_tree_membership(tree_a_id)
+    OR public.has_tree_membership(tree_b_id)
   );
 
 CREATE POLICY "Tree participants can create member links"
@@ -234,10 +286,10 @@ CREATE POLICY "Tree participants can create member links"
   WITH CHECK (
     auth.uid() = created_by
     AND (
-      EXISTS (SELECT 1 FROM public.trees WHERE id = tree_a_id AND owner_id = auth.uid())
-      OR EXISTS (SELECT 1 FROM public.tree_memberships WHERE tree_id = tree_a_id AND user_id = auth.uid())
-      OR EXISTS (SELECT 1 FROM public.trees WHERE id = tree_b_id AND owner_id = auth.uid())
-      OR EXISTS (SELECT 1 FROM public.tree_memberships WHERE tree_id = tree_b_id AND user_id = auth.uid())
+      public.is_tree_owner(tree_a_id)
+      OR public.has_tree_membership(tree_a_id)
+      OR public.is_tree_owner(tree_b_id)
+      OR public.has_tree_membership(tree_b_id)
     )
   );
 
@@ -245,18 +297,10 @@ CREATE POLICY "Link participants can update member links"
   ON public.member_links FOR UPDATE
   USING (
     auth.uid() = created_by
-    OR EXISTS (
-      SELECT 1 FROM public.trees t
-      WHERE (t.id = member_links.tree_a_id OR t.id = member_links.tree_b_id)
-        AND t.owner_id = auth.uid()
-    )
-    OR EXISTS (
-      SELECT 1 FROM public.tree_memberships tm
-      JOIN public.trees t ON t.id = tm.tree_id
-      WHERE tm.user_id = auth.uid()
-        AND (t.id = member_links.tree_a_id OR t.id = member_links.tree_b_id)
-        AND tm.role IN ('editor', 'contributor')
-    )
+    OR public.is_tree_owner(tree_a_id)
+    OR public.is_tree_owner(tree_b_id)
+    OR public.has_tree_membership_role(tree_a_id, ARRAY['editor', 'contributor']::public.collaboration_role[])
+    OR public.has_tree_membership_role(tree_b_id, ARRAY['editor', 'contributor']::public.collaboration_role[])
   );
 
 DROP POLICY IF EXISTS "Tree owners manage suggestions" ON public.suggestions;
@@ -282,11 +326,9 @@ CREATE POLICY "Authors can create suggestions on accessible trees"
   ON public.suggestions FOR INSERT
   WITH CHECK (
     auth.uid() = author_id
-    AND EXISTS (
-      SELECT 1 FROM public.tree_memberships tm
-      WHERE tm.tree_id = suggestions.tree_id
-        AND tm.user_id = auth.uid()
-        AND tm.role IN ('contributor', 'editor')
+    AND public.has_tree_membership_role(
+      tree_id,
+      ARRAY['contributor', 'editor']::public.collaboration_role[]
     )
   );
 
@@ -294,14 +336,8 @@ CREATE POLICY "Authors and owners can view suggestions"
   ON public.suggestions FOR SELECT
   USING (
     auth.uid() = author_id
-    OR EXISTS (
-      SELECT 1 FROM public.trees
-      WHERE trees.id = suggestions.tree_id AND trees.owner_id = auth.uid()
-    )
-    OR EXISTS (
-      SELECT 1 FROM public.tree_memberships tm
-      WHERE tm.tree_id = suggestions.tree_id AND tm.user_id = auth.uid()
-    )
+    OR public.is_tree_owner(tree_id)
+    OR public.has_tree_membership(tree_id)
   );
 
 DROP POLICY IF EXISTS "Members readable via tree membership" ON public.members;
@@ -313,43 +349,19 @@ DROP POLICY IF EXISTS "Authenticated users can browse family directory" ON publi
 
 CREATE POLICY "Members readable via tree membership"
   ON public.members FOR SELECT
-  USING (
-    EXISTS (
-      SELECT 1 FROM public.tree_memberships tm
-      WHERE tm.tree_id = members.tree_id AND tm.user_id = auth.uid()
-    )
-  );
+  USING (public.has_tree_membership(tree_id));
 
 CREATE POLICY "Editors can update members via membership"
   ON public.members FOR UPDATE
-  USING (
-    EXISTS (
-      SELECT 1 FROM public.tree_memberships tm
-      WHERE tm.tree_id = members.tree_id
-        AND tm.user_id = auth.uid()
-        AND tm.role = 'editor'
-    )
-  );
+  USING (public.has_tree_membership_role(tree_id, ARRAY['editor']::public.collaboration_role[]));
 
 CREATE POLICY "Editors can insert members via membership"
   ON public.members FOR INSERT
-  WITH CHECK (
-    EXISTS (
-      SELECT 1 FROM public.tree_memberships tm
-      WHERE tm.tree_id = members.tree_id
-        AND tm.user_id = auth.uid()
-        AND tm.role = 'editor'
-    )
-  );
+  WITH CHECK (public.has_tree_membership_role(tree_id, ARRAY['editor']::public.collaboration_role[]));
 
 CREATE POLICY "Members can view shared trees"
   ON public.trees FOR SELECT
-  USING (
-    EXISTS (
-      SELECT 1 FROM public.tree_memberships tm
-      WHERE tm.tree_id = trees.id AND tm.user_id = auth.uid()
-    )
-  );
+  USING (public.has_tree_membership(id));
 
 CREATE POLICY "Users can view profiles of collaborators"
   ON public.profiles FOR SELECT
