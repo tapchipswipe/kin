@@ -158,10 +158,11 @@ export function useCollaborationStore(
     if (mergedMembers.length === 0) return;
     const anchor = mergeResult.virtualMembers.find((v) => v.isAnchor);
     const defaultFocus = anchor?.virtualId ?? mergedMembers[0]?.id ?? null;
-    if (!hubFocusId || !mergedMembers.find((m) => m.id === hubFocusId)) {
-      setHubFocusId(defaultFocus);
-    }
-  }, [mergedMembers, mergeResult.virtualMembers, hubFocusId]);
+    setHubFocusId((current) => {
+      if (current && mergedMembers.some((m) => m.id === current)) return current;
+      return defaultFocus;
+    });
+  }, [mergedMembers, mergeResult.virtualMembers]);
 
   const askToCollab = async (targetUserId: string) => {
     await sendCollabRequest(targetUserId);

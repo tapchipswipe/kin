@@ -87,6 +87,115 @@ export const TreeCanvas: React.FC<TreeCanvasProps> = ({
 
   const getHeritageSideFor = (memberId: string) => heritageMap.get(memberId) ?? 'neutral';
 
+  const father = centerMember?.fatherId
+    ? members.find((m) => m.id === centerMember.fatherId)
+    : null;
+  const mother = centerMember?.motherId
+    ? members.find((m) => m.id === centerMember.motherId)
+    : null;
+  const paternalGrandfather = father?.fatherId ? members.find((m) => m.id === father.fatherId) : null;
+  const paternalGrandmother = father?.motherId ? members.find((m) => m.id === father.motherId) : null;
+  const maternalGrandfather = mother?.fatherId ? members.find((m) => m.id === mother.fatherId) : null;
+  const maternalGrandmother = mother?.motherId ? members.find((m) => m.id === mother.motherId) : null;
+  const spouses = centerMember
+    ? members.filter((m) => (centerMember.spouseIds ?? []).includes(m.id))
+    : [];
+  const siblings = centerMember
+    ? members.filter((m) => {
+        if (m.id === centerMember.id) return false;
+        const sameFather = centerMember.fatherId && m.fatherId === centerMember.fatherId;
+        const sameMother = centerMember.motherId && m.motherId === centerMember.motherId;
+        return sameFather || sameMother;
+      })
+    : [];
+  const children = centerMember
+    ? members.filter((m) => (centerMember.childrenIds ?? []).includes(m.id))
+    : [];
+
+  const fatherAngle = -120;
+  const motherAngle = -60;
+
+  const radialNodes = useMemo(() => {
+    if (!centerMember) return [];
+
+    const list: { member: FamilyMember; role: string; r: number; angle: number }[] = [];
+
+    list.push({ member: centerMember, role: 'Focus Center', r: 0, angle: 0 });
+
+    if (father) {
+      list.push({ member: father, role: 'Father', r: 130, angle: fatherAngle });
+    }
+    if (mother) {
+      list.push({ member: mother, role: 'Mother', r: 130, angle: motherAngle });
+    }
+
+    if (spouses.length === 1) {
+      list.push({ member: spouses[0], role: 'Spouse', r: 130, angle: 0 });
+    } else if (spouses.length > 1) {
+      spouses.forEach((sp, idx) => {
+        const offset = -20 + (idx * 40) / (spouses.length - 1);
+        list.push({ member: sp, role: 'Spouse', r: 130, angle: offset });
+      });
+    }
+
+    if (siblings.length === 1) {
+      list.push({ member: siblings[0], role: 'Sibling', r: 130, angle: 180 });
+    } else if (siblings.length > 1) {
+      siblings.forEach((sib, idx) => {
+        const offset = 150 + (idx * 60) / (siblings.length - 1);
+        list.push({ member: sib, role: 'Sibling', r: 130, angle: offset });
+      });
+    }
+
+    if (children.length === 1) {
+      list.push({ member: children[0], role: 'Child', r: 130, angle: 90 });
+    } else if (children.length > 1) {
+      children.forEach((child, idx) => {
+        const offset = 45 + (idx * 90) / (children.length - 1);
+        list.push({ member: child, role: 'Child', r: 130, angle: offset });
+      });
+    }
+
+    if (paternalGrandfather) {
+      list.push({ member: paternalGrandfather, role: 'Grandfather (Pat.)', r: 260, angle: -145 });
+    }
+    if (paternalGrandmother) {
+      list.push({ member: paternalGrandmother, role: 'Grandmother (Pat.)', r: 260, angle: -100 });
+    }
+    if (maternalGrandfather) {
+      list.push({ member: maternalGrandfather, role: 'Grandfather (Mat.)', r: 260, angle: -80 });
+    }
+    if (maternalGrandmother) {
+      list.push({ member: maternalGrandmother, role: 'Grandmother (Mat.)', r: 260, angle: -35 });
+    }
+
+    const grandchildren = children.flatMap((c) =>
+      members.filter((m) => (c.childrenIds ?? []).includes(m.id))
+    );
+    if (grandchildren.length === 1) {
+      list.push({ member: grandchildren[0], role: 'Grandchild', r: 260, angle: 90 });
+    } else if (grandchildren.length > 1) {
+      grandchildren.forEach((gc, idx) => {
+        const offset = 35 + (idx * 110) / (grandchildren.length - 1);
+        list.push({ member: gc, role: 'Grandchild', r: 260, angle: offset });
+      });
+    }
+
+    return list;
+  }, [
+    centerMember,
+    father,
+    mother,
+    spouses,
+    siblings,
+    children,
+    paternalGrandfather,
+    paternalGrandmother,
+    maternalGrandfather,
+    maternalGrandmother,
+    members,
+  ]);
+
   if (members.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center h-96 border-2 border-dashed border-[#E5E1DA] rounded-2xl bg-[#FAF9F6] text-[#7A7570] p-8 text-center">
@@ -118,122 +227,11 @@ export const TreeCanvas: React.FC<TreeCanvasProps> = ({
     );
   }
 
-  // --- Resolve Nodes surrounding the center ---
-  const father = centerMember.fatherId ? members.find((m) => m.id === centerMember.fatherId) : null;
-  const mother = centerMember.motherId ? members.find((m) => m.id === centerMember.motherId) : null;
-
-  // Grandparents
-  const paternalGrandfather = father?.fatherId ? members.find((m) => m.id === father.fatherId) : null;
-  const paternalGrandmother = father?.motherId ? members.find((m) => m.id === father.motherId) : null;
-  const maternalGrandfather = mother?.fatherId ? members.find((m) => m.id === mother.fatherId) : null;
-  const maternalGrandmother = mother?.motherId ? members.find((m) => m.id === mother.motherId) : null;
-
-  // Spouses
-  const spouses = members.filter((m) => (centerMember.spouseIds ?? []).includes(m.id));
-
-  const siblings = members.filter((m) => {
-    if (m.id === centerMember.id) return false;
-    const sameFather = centerMember.fatherId && m.fatherId === centerMember.fatherId;
-    const sameMother = centerMember.motherId && m.motherId === centerMember.motherId;
-    return sameFather || sameMother;
-  });
-
-  const children = members.filter((m) => (centerMember.childrenIds ?? []).includes(m.id));
-
-  // Helper helper to format dates beautifully
   const getYearSpan = (m: FamilyMember) => {
     const bYear = m.birthDate ? m.birthDate.slice(0, 4) : '????';
     const dYear = m.isDeceased ? (m.deathDate ? m.deathDate.slice(0, 4) : 'Deceased') : 'Present';
     return `${bYear} – ${dYear}`;
   };
-
-  // --- Dynamic Math Computations for Compact Radial Coordinates ---
-  const fatherAngle = -120;
-  const motherAngle = -60;
-
-  const radialNodes = useMemo(() => {
-    const list: { member: FamilyMember; role: string; r: number; angle: number }[] = [];
-
-    // Focus center is always origin (r=0)
-    list.push({ member: centerMember, role: 'Focus Center', r: 0, angle: 0 });
-
-    // Inner Circle (Ring 1, r=130)
-    if (father) {
-      list.push({ member: father, role: 'Father', r: 130, angle: fatherAngle });
-    }
-    if (mother) {
-      list.push({ member: mother, role: 'Mother', r: 130, angle: motherAngle });
-    }
-
-    // Spouses spaced on right (around 0 degrees)
-    if (spouses.length === 1) {
-      list.push({ member: spouses[0], role: 'Spouse', r: 130, angle: 0 });
-    } else if (spouses.length > 1) {
-      spouses.forEach((sp, idx) => {
-        const offset = -20 + (idx * 40) / (spouses.length - 1);
-        list.push({ member: sp, role: 'Spouse', r: 130, angle: offset });
-      });
-    }
-
-    // Siblings spaced on left (around 180 degrees)
-    if (siblings.length === 1) {
-      list.push({ member: siblings[0], role: 'Sibling', r: 130, angle: 180 });
-    } else if (siblings.length > 1) {
-      siblings.forEach((sib, idx) => {
-        const offset = 150 + (idx * 60) / (siblings.length - 1); // 150 to 210 degrees
-        list.push({ member: sib, role: 'Sibling', r: 130, angle: offset });
-      });
-    }
-
-    // Children spaced at the bottom (around 90 degrees)
-    if (children.length === 1) {
-      list.push({ member: children[0], role: 'Child', r: 130, angle: 90 });
-    } else if (children.length > 1) {
-      children.forEach((child, idx) => {
-        const offset = 45 + (idx * 90) / (children.length - 1); // 45 to 135 degrees
-        list.push({ member: child, role: 'Child', r: 130, angle: offset });
-      });
-    }
-
-    // Outer Circle (Ring 2, r=260)
-    if (paternalGrandfather) {
-      list.push({ member: paternalGrandfather, role: 'Grandfather (Pat.)', r: 260, angle: -145 });
-    }
-    if (paternalGrandmother) {
-      list.push({ member: paternalGrandmother, role: 'Grandmother (Pat.)', r: 260, angle: -100 });
-    }
-    if (maternalGrandfather) {
-      list.push({ member: maternalGrandfather, role: 'Grandfather (Mat.)', r: 260, angle: -80 });
-    }
-    if (maternalGrandmother) {
-      list.push({ member: maternalGrandmother, role: 'Grandmother (Mat.)', r: 260, angle: -35 });
-    }
-
-    // Grandchildren
-    const grandchildren = children.flatMap((c) => members.filter((m) => (c.childrenIds ?? []).includes(m.id)));
-    if (grandchildren.length === 1) {
-      list.push({ member: grandchildren[0], role: 'Grandchild', r: 260, angle: 90 });
-    } else if (grandchildren.length > 1) {
-      grandchildren.forEach((gc, idx) => {
-        const offset = 35 + (idx * 110) / (grandchildren.length - 1); // 35 to 145 degrees
-        list.push({ member: gc, role: 'Grandchild', r: 260, angle: offset });
-      });
-    }
-
-    return list;
-  }, [
-    centerMember,
-    father,
-    mother,
-    spouses,
-    siblings,
-    children,
-    paternalGrandfather,
-    paternalGrandmother,
-    maternalGrandfather,
-    maternalGrandmother,
-    members,
-  ]);
 
   const getCoordinates = (r: number, angleDegrees: number) => {
     const radians = (angleDegrees * Math.PI) / 180;
