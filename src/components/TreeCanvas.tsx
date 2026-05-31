@@ -23,9 +23,13 @@ import {
 } from 'lucide-react';
 import { motion } from 'motion/react';
 
+type TreeLayout = 'hierarchical' | 'radial' | 'grid';
+
 interface TreeCanvasProps {
   members: FamilyMember[];
   focusId: string;
+  layout: TreeLayout;
+  onLayoutChange: (layout: TreeLayout) => void;
   onSelectFocus: (id: string) => void;
   onAddRelativeRequest: (memberId: string, type: 'father' | 'mother' | 'spouse' | 'child') => void;
 }
@@ -33,14 +37,11 @@ interface TreeCanvasProps {
 export const TreeCanvas: React.FC<TreeCanvasProps> = ({
   members,
   focusId,
+  layout,
+  onLayoutChange,
   onSelectFocus,
   onAddRelativeRequest,
 }) => {
-  // Support traditional tree, orbital constallation radial, or compact grid layout
-  const [layout, setLayout] = useState<'hierarchical' | 'radial' | 'grid'>(() => {
-    const saved = localStorage.getItem('family_lineage_blueprint_layout');
-    return (saved as any) || 'hierarchical';
-  });
 
   const [collapsedNodes, setCollapsedNodes] = useState<Set<string>>(new Set());
 
@@ -54,9 +55,8 @@ export const TreeCanvas: React.FC<TreeCanvasProps> = ({
     });
   };
 
-  const handleSetLayout = (newLayout: 'hierarchical' | 'radial' | 'grid') => {
-    setLayout(newLayout);
-    localStorage.setItem('family_lineage_blueprint_layout', newLayout);
+  const handleSetLayout = (newLayout: TreeLayout) => {
+    onLayoutChange(newLayout);
   };
 
   // Find current focus member

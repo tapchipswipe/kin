@@ -33,46 +33,16 @@ import { motion, AnimatePresence } from 'motion/react';
 
 interface LineageMapProps {
   members: FamilyMember[];
+  geocodeCache: Record<string, { lat: number; lng: number }>;
+  onGeocodeCacheUpdate: (cache: Record<string, { lat: number; lng: number }>) => void;
   onSelectMember: (id: string) => void;
 }
 
-// Pre-seeded high-speed coordinate dictionary for classic family demo records
-// Prevents API latency, reduces cold start and quota expense
-const STATIC_COORDINATE_CACHE: Record<string, { lat: number; lng: number }> = {
-  'Edinburgh, Scotland': { lat: 55.9533, lng: -3.1883 },
-  'Glasgow, Scotland': { lat: 55.8642, lng: -4.2518 },
-  'Ellis Island, NY': { lat: 40.6987, lng: -74.0396 },
-  'Boston, Massachusetts, USA': { lat: 42.3601, lng: -71.0589 },
-  'Boston, Massachusetts': { lat: 42.3601, lng: -71.0589 },
-  'Boston, MA': { lat: 42.3601, lng: -71.0589 },
-  'Belfast, Ireland': { lat: 54.5973, lng: -5.9301 },
-  'Portland, Oregon, USA': { lat: 45.5152, lng: -122.6784 },
-  'Portland, OR': { lat: 45.5152, lng: -122.6784 },
-  'Portland, Oregon': { lat: 45.5152, lng: -122.6784 },
-  'Eugene, Oregon': { lat: 44.0521, lng: -123.0868 },
-  'Oregon, USA': { lat: 43.8041, lng: -120.5542 },
-  'Eugene, OR': { lat: 44.0521, lng: -123.0868 },
-  'Philadelphia, Pennsylvania': { lat: 39.9526, lng: -75.1652 },
-  'Brooklyn, New York': { lat: 40.6782, lng: -73.9442 },
-  'Brooklyn, NY': { lat: 40.6782, lng: -73.9442 },
-  'New York, New York, USA': { lat: 40.7128, lng: -74.0060 },
-  'New York, NY': { lat: 40.7128, lng: -74.0060 },
-  'New York, USA': { lat: 40.7128, lng: -74.0060 },
-  'Seattle, Washington': { lat: 47.6062, lng: -122.3321 },
-  'Seattle, WA': { lat: 47.6062, lng: -122.3321 },
-  'Denver, Colorado': { lat: 39.7392, lng: -104.9903 },
-  'New Haven, Connecticut, USA': { lat: 41.3083, lng: -72.9279 },
-  'New Haven, CT': { lat: 41.3083, lng: -72.9279 },
-  'San Francisco, California': { lat: 37.7749, lng: -122.4194 },
-  'Salem, OR': { lat: 44.9429, lng: -123.0351 },
-  'Western Europe': { lat: 48.8566, lng: 2.3522 }
-};
-
 const API_KEY =
   process.env.GOOGLE_MAPS_PLATFORM_KEY ||
-  (import.meta as any).env?.VITE_GOOGLE_MAPS_PLATFORM_KEY ||
-  (globalThis as any).GOOGLE_MAPS_PLATFORM_KEY ||
+  import.meta.env.VITE_GOOGLE_MAPS_PLATFORM_KEY ||
   '';
+const MAP_ID = import.meta.env.VITE_GOOGLE_MAPS_MAP_ID || 'DEMO_MAP_ID';
 const hasValidKey = Boolean(API_KEY) && API_KEY !== 'YOUR_API_KEY';
 
 interface PlotData {
@@ -84,21 +54,18 @@ interface PlotData {
   lng: number;
 }
 
-export const LineageMap: React.FC<LineageMapProps> = ({ members, onSelectMember }) => {
+export const LineageMap: React.FC<LineageMapProps> = ({
+  members,
+  geocodeCache,
+  onGeocodeCacheUpdate,
+  onSelectMember,
+}) => {
   const [showBirthplaces, setShowBirthplaces] = useState(true);
   const [showDeathplaces, setShowDeathplaces] = useState(true);
   const [showJourneys, setShowJourneys] = useState(true);
   const [selectedMemberId, setSelectedMemberId] = useState<string>('all');
-  
-  // Geolocation cache for custom additions (saved in localStorage)
-  const [customGeocodes, setCustomGeocodes] = useState<Record<string, { lat: number; lng: number }>>(() => {
-    try {
-      const saved = localStorage.getItem('family_lineage_geocodes_cache');
-      return saved ? JSON.parse(saved) : {};
-    } catch {
-      return {};
-    }
-  });
+
+  const customGeocodes = geocodeCache;
 
   // Dynamic Google Geocoder instance reference
   const geocodingLib = useMapsLibrary('geocoding');
@@ -119,13 +86,13 @@ export const LineageMap: React.FC<LineageMapProps> = ({ members, onSelectMember 
     members.forEach(m => {
       if (m.birthPlace && m.birthPlace.trim()) {
         const p = m.birthPlace.trim();
-        if (!STATIC_COORDINATE_CACHE[p] && !customGeocodes[p]) {
+        if (!customGeocodes[p]) {
           locationsToResolve.add(p);
         }
       }
       if (m.deathPlace && m.deathPlace.trim()) {
         const p = m.deathPlace.trim();
-        if (!STATIC_COORDINATE_CACHE[p] && !customGeocodes[p]) {
+        if (!customGeocodes[p]) {
           locationsToResolve.add(p);
         }
       }
@@ -142,13 +109,9 @@ export const LineageMap: React.FC<LineageMapProps> = ({ members, onSelectMember 
           if (status === 'OK' && results?.[0]?.geometry?.location) {
             const coords = {
               lat: results[0].geometry.location.lat(),
-              lng: results[0].geometry.location.lng()
+              lng: results[0].geometry.location.lng(),
             };
-            setCustomGeocodes(prev => {
-              const updated = { ...prev, [loc]: coords };
-              localStorage.setItem('family_lineage_geocodes_cache', JSON.stringify(updated));
-              return updated;
-            });
+            onGeocodeCacheUpdate({ ...customGeocodes, [loc]: coords });
           } else {
             console.warn(`Geocoding failed for place: "${loc}" with status:`, status);
           }
@@ -156,13 +119,11 @@ export const LineageMap: React.FC<LineageMapProps> = ({ members, onSelectMember 
       }, delay);
       delay += 400; // 400ms interval matching rate constraints
     });
-  }, [members, customGeocodes, geocodingLib]);
+  }, [members, customGeocodes, geocodingLib, onGeocodeCacheUpdate]);
 
-  // Combined coordinate lookup helper
   const getCoordinates = (placeName: string | undefined): { lat: number; lng: number } | null => {
     if (!placeName) return null;
     const name = placeName.trim();
-    if (STATIC_COORDINATE_CACHE[name]) return STATIC_COORDINATE_CACHE[name];
     if (customGeocodes[name]) return customGeocodes[name];
     return null;
   };
@@ -441,7 +402,7 @@ export const LineageMap: React.FC<LineageMapProps> = ({ members, onSelectMember 
             <Map
               defaultCenter={{ lat: 39.8283, lng: -42.5795 }} // Medium view looking across Atlantic connecting UK to US
               defaultZoom={2.8}
-              mapId="LINEAGE_DEMO_MAP_ID"
+              mapId={MAP_ID}
               internalUsageAttributionIds={['gmp_mcp_codeassist_v1_aistudio']}
               style={{ width: '100%', height: '100%' }}
               gestureHandling="cooperative"

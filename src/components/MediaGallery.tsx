@@ -26,16 +26,22 @@ import {
   Loader2
 } from 'lucide-react';
 
+import { uploadMediaFile, uploadDataUrl, deleteMediaFile, isStorageUrl } from '../lib/mediaStorage';
+
 interface MediaGalleryProps {
   member: FamilyMember;
   onUpdateMedia: (updatedMediaList: MediaAttachment[]) => void;
   readOnly?: boolean;
+  userId?: string;
+  treeId?: string;
 }
 
 export const MediaGallery: React.FC<MediaGalleryProps> = ({
   member,
   onUpdateMedia,
-  readOnly = false
+  readOnly = false,
+  userId,
+  treeId,
 }) => {
   const mediaList = member.media || [];
   const events = member.events || [];
@@ -102,29 +108,37 @@ export const MediaGallery: React.FC<MediaGalleryProps> = ({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          bio: member.bio || '',
+          bio: member.biography || '',
           gender: member.gender || 'Unknown',
-          name: `${member.firstName} ${member.lastName}`
-        })
+          name: `${member.firstName} ${member.lastName}`,
+        }),
       });
       const data = await response.json();
       if (!response.ok) {
         throw new Error(data.error || 'Failed to generate');
       }
 
+      let url = data.imageUrl as string;
+      const mediaId = 'med_' + Date.now();
+
+      if (userId && treeId && url.startsWith('data:')) {
+        const mimeMatch = url.match(/^data:([^;]+);/);
+        url = await uploadDataUrl(userId, treeId, url, mediaId, mimeMatch?.[1] ?? 'image/png');
+      }
+
       const newAttachment: MediaAttachment = {
-        id: 'med_' + Date.now(),
+        id: mediaId,
         name: 'Artistic Ancestor Sketch',
         type: 'image',
-        url: data.imageUrl,
+        url,
         uploadedAt: new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' }),
         size: 'AI Generated',
-        notes: 'Artistic sketch generated based on biographical context.'
+        notes: 'Artistic sketch generated based on biographical context.',
       };
 
       onUpdateMedia([...mediaList, newAttachment]);
-    } catch (e: any) {
-      alert(e.message);
+    } catch (e: unknown) {
+      alert(e instanceof Error ? e.message : 'Failed to generate sketch');
     } finally {
       setIsGenerating(false);
     }
@@ -160,24 +174,37 @@ export const MediaGallery: React.FC<MediaGalleryProps> = ({
   };
 
   // Save the customized uploaded file information
-  const handleCommitMedia = (e: React.FormEvent) => {
+  const handleCommitMedia = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newMediaDataUrl || !newMediaName.trim()) return;
 
+    const mediaId = 'med_' + Date.now();
+    let url = newMediaDataUrl;
+
+    if (userId && treeId && newMediaDataUrl.startsWith('data:')) {
+      try {
+        const blob = await fetch(newMediaDataUrl).then((r) => r.blob());
+        const file = new File([blob], newMediaName, { type: blob.type });
+        url = await uploadMediaFile(userId, treeId, file, mediaId);
+      } catch (err) {
+        alert(err instanceof Error ? err.message : 'Upload failed');
+        return;
+      }
+    }
+
     const newAttachment: MediaAttachment = {
-      id: 'med_' + Date.now(),
+      id: mediaId,
       name: newMediaName.trim(),
       type: newMediaType,
-      url: newMediaDataUrl,
+      url,
       uploadedAt: new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' }),
       size: newMediaSize || 'Unknown size',
       notes: newMediaNotes.trim() || undefined,
-      associatedEventId: newMediaEventId || undefined
+      associatedEventId: newMediaEventId || undefined,
     };
 
     onUpdateMedia([...mediaList, newAttachment]);
-    
-    // Reset uploading states
+
     setNewMediaName('');
     setNewMediaNotes('');
     setNewMediaEventId('');
@@ -186,11 +213,14 @@ export const MediaGallery: React.FC<MediaGalleryProps> = ({
     setIsUploading(false);
   };
 
-  // Delete attachment
   const handleDeleteMedia = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
     if (confirm('Are you sure you want to delete this historical media credential? This action is irreversible.')) {
-      const nextList = mediaList.filter(item => item.id !== id);
+      const item = mediaList.find((m) => m.id === id);
+      if (item && isStorageUrl(item.url)) {
+        deleteMediaFile(item.url);
+      }
+      const nextList = mediaList.filter((item) => item.id !== id);
       onUpdateMedia(nextList);
       if (activePreview?.id === id) {
         setActivePreview(null);
