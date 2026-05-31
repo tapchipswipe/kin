@@ -13,6 +13,7 @@ import {
   ProposedSuggestion,
   TreeInvite,
 } from '../types';
+import { normalizeFamilyMembers } from './importFamilyJson';
 import { saveMembers } from './lineageDb';
 import { supabase } from './supabase';
 
@@ -68,7 +69,7 @@ export async function loadAccessibleTrees(
     ownerId: userId,
     ownerName: 'You',
     role: 'owner',
-    members: ownMembers,
+    members: normalizeFamilyMembers(ownMembers),
     isOwnTree: true,
   };
 
@@ -97,7 +98,9 @@ export async function loadAccessibleTrees(
       ownerId: tree.owner_id,
       ownerName,
       role: row.role as CollaborationRole,
-      members: (membersResult.data ?? []).map((m) => m.data as FamilyMember),
+      members: normalizeFamilyMembers(
+        (membersResult.data ?? []).map((m) => m.data as FamilyMember)
+      ),
       isOwnTree: false,
     });
   }
@@ -454,10 +457,12 @@ export function suggestLinkCandidates(
       const treeB = trees[j];
       for (const ma of treeA.members) {
         for (const mb of treeB.members) {
-          const nameMatch =
-            ma.firstName.toLowerCase() === mb.firstName.toLowerCase() &&
-            ma.lastName.toLowerCase() === mb.lastName.toLowerCase();
-          if (!nameMatch) continue;
+          const firstA = `${ma.firstName ?? ''}`.trim().toLowerCase();
+          const firstB = `${mb.firstName ?? ''}`.trim().toLowerCase();
+          const lastA = `${ma.lastName ?? ''}`.trim().toLowerCase();
+          const lastB = `${mb.lastName ?? ''}`.trim().toLowerCase();
+          if (!firstA || !firstB || !lastA || !lastB) continue;
+          if (firstA !== firstB || lastA !== lastB) continue;
 
           const yearA = ma.birthDate?.slice(0, 4);
           const yearB = mb.birthDate?.slice(0, 4);

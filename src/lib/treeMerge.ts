@@ -11,6 +11,7 @@ import {
   MergedMemberSource,
   VirtualMember,
 } from '../types';
+import { normalizeFamilyMember } from './importFamilyJson';
 
 function compositeKey(treeId: string, memberId: string): string {
   return `${treeId}::${memberId}`;
@@ -73,8 +74,8 @@ function mergeMemberFields(primary: FamilyMember, secondary: FamilyMember): Fami
     avatarUrl: pick('avatarUrl'),
     spouseIds: [...new Set([...(primary.spouseIds || []), ...(secondary.spouseIds || [])])],
     childrenIds: [...new Set([...(primary.childrenIds || []), ...(secondary.childrenIds || [])])],
-    timelineEvents: pick('timelineEvents') as FamilyMember['timelineEvents'],
-    mediaAttachments: pick('mediaAttachments') as FamilyMember['mediaAttachments'],
+    events: pick('events') as FamilyMember['events'],
+    media: pick('media') as FamilyMember['media'],
   };
 }
 
@@ -98,7 +99,11 @@ export interface MergeResult {
 }
 
 export function mergeTrees(input: MergeInput): MergeResult {
-  const { trees, links, anchorTreeId, anchorMemberId, userId } = input;
+  const trees = input.trees.map((tree) => ({
+    ...tree,
+    members: tree.members.map((member, index) => normalizeFamilyMember(member, index)),
+  }));
+  const { links, anchorTreeId, anchorMemberId, userId } = input;
   const acceptedLinks = links.filter((l) => l.status === 'accepted');
   const uf = new UnionFind();
 
@@ -248,24 +253,26 @@ export function mergeTrees(input: MergeInput): MergeResult {
 
   // Sync reciprocal spouse/child links within virtual graph
   for (const vm of virtualMembers) {
-    for (const spouseId of vm.spouseIds) {
+    for (const spouseId of vm.spouseIds ?? []) {
       const spouse = virtualById.get(spouseId);
-      if (spouse && !spouse.spouseIds.includes(vm.virtualId)) {
+      if (!spouse) continue;
+      if (!spouse.spouseIds) spouse.spouseIds = [];
+      if (!spouse.spouseIds.includes(vm.virtualId)) {
         spouse.spouseIds.push(vm.virtualId);
       }
     }
-    for (const childId of vm.childrenIds) {
+    for (const childId of vm.childrenIds ?? []) {
       const child = virtualById.get(childId);
-      if (child) {
-        const srcMember = vm.sources[0];
-        const orig = trees
-          .find((t) => t.treeId === srcMember.treeId)
-          ?.members.find((m) => m.id === srcMember.memberId);
-        if (orig?.gender === 'male' && child.fatherId !== vm.virtualId) {
-          child.fatherId = vm.virtualId;
-        } else if (orig?.gender === 'female' && child.motherId !== vm.virtualId) {
-          child.motherId = vm.virtualId;
-        }
+      if (!child) continue;
+      const srcMember = vm.sources[0];
+      if (!srcMember) continue;
+      const orig = trees
+        .find((t) => t.treeId === srcMember.treeId)
+        ?.members.find((m) => m.id === srcMember.memberId);
+      if (orig?.gender === 'male' && child.fatherId !== vm.virtualId) {
+        child.fatherId = vm.virtualId;
+      } else if (orig?.gender === 'female' && child.motherId !== vm.virtualId) {
+        child.motherId = vm.virtualId;
       }
     }
   }

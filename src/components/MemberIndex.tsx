@@ -93,8 +93,16 @@ export const MemberIndex: React.FC<MemberIndexProps> = ({
         return birthA - birthB;
       }
       if (sortBy === 'relations') {
-        const scoreA = a.childrenIds.length + a.spouseIds.length + (a.fatherId ? 1 : 0) + (a.motherId ? 1 : 0);
-        const scoreB = b.childrenIds.length + b.spouseIds.length + (b.fatherId ? 1 : 0) + (b.motherId ? 1 : 0);
+        const scoreA =
+          (a.childrenIds ?? []).length +
+          (a.spouseIds ?? []).length +
+          (a.fatherId ? 1 : 0) +
+          (a.motherId ? 1 : 0);
+        const scoreB =
+          (b.childrenIds ?? []).length +
+          (b.spouseIds ?? []).length +
+          (b.fatherId ? 1 : 0) +
+          (b.motherId ? 1 : 0);
         // Desending connection strength
         return scoreB - scoreA;
       }
@@ -267,8 +275,8 @@ export const MemberIndex: React.FC<MemberIndexProps> = ({
         {filteredMembers.length > 0 ? (
           filteredMembers.map((m) => {
             const eraObj = getEraLabel(m.birthDate);
-            const spouseCount = m.spouseIds.length;
-            const childrenCount = m.childrenIds.length;
+            const spouseCount = (m.spouseIds ?? []).length;
+            const childrenCount = (m.childrenIds ?? []).length;
 
             return (
               <div

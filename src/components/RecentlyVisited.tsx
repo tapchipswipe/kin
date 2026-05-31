@@ -78,7 +78,7 @@ export const RecentlyVisited: React.FC<RecentlyVisitedProps> = ({
                     className="w-6 h-6 rounded-full flex items-center justify-center font-serif text-[11px] font-bold text-white shrink-0 select-none pb-0.5"
                     style={{ backgroundColor: member.avatarUrl || '#2D2926' }}
                   >
-                    {member.firstName[0]}
+                    {(member.firstName?.[0] ?? '?').toUpperCase()}
                   </span>
 
                   <div className="min-w-0">

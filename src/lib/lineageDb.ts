@@ -4,6 +4,7 @@
  */
 
 import { FamilyMember } from '../types';
+import { normalizeFamilyMembers } from './importFamilyJson';
 import { supabase } from './supabase';
 
 export type TreeLayout = 'hierarchical' | 'radial' | 'grid' | 'dualRoots' | 'mergedRoots';
@@ -87,8 +88,8 @@ export async function loadLineageData(userId: string): Promise<LineageData> {
   if (membersResult.error) throw new Error(getSupabaseErrorMessage(membersResult.error));
   if (prefsResult.error) throw new Error(getSupabaseErrorMessage(prefsResult.error));
 
-  const members = (membersResult.data ?? []).map(
-    (row) => row.data as FamilyMember
+  const members = normalizeFamilyMembers(
+    (membersResult.data ?? []).map((row) => row.data as FamilyMember)
   );
 
   let prefs = prefsResult.data;

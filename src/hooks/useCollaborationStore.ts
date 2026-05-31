@@ -32,6 +32,7 @@ import {
   updateMemberLinkStatus,
   updateSuggestionStatus,
 } from '../lib/collaborationDb';
+import { isImportedTreeId, newImportedTreeId, normalizeFamilyMembers } from '../lib/importFamilyJson';
 import { mergeTrees, virtualMembersForCanvas } from '../lib/treeMerge';
 
 export function useCollaborationStore(
@@ -41,6 +42,8 @@ export function useCollaborationStore(
   anchorMemberId: string | null
 ) {
   const [accessibleTrees, setAccessibleTrees] = useState<AccessibleTree[]>([]);
+  const [importedTrees, setImportedTrees] = useState<AccessibleTree[]>([]);
+  const [localMemberLinks, setLocalMemberLinks] = useState<MemberLink[]>([]);
   const [familyDirectory, setFamilyDirectory] = useState<FamilyDirectoryEntry[]>([]);
   const [incomingCollabRequests, setIncomingCollabRequests] = useState<CollabRequest[]>([]);
   const [memberLinks, setMemberLinks] = useState<MemberLink[]>([]);
@@ -49,6 +52,16 @@ export function useCollaborationStore(
   const [error, setError] = useState<string | null>(null);
   const [schemaMissing, setSchemaMissing] = useState(false);
   const [hubFocusId, setHubFocusId] = useState<string | null>(null);
+
+  const treesForMerge = useMemo(
+    () => [...accessibleTrees, ...importedTrees],
+    [accessibleTrees, importedTrees]
+  );
+
+  const allMemberLinks = useMemo(
+    () => [...memberLinks, ...localMemberLinks],
+    [memberLinks, localMemberLinks]
+  );
 
   const refresh = useCallback(async () => {
     if (!userId || !ownTreeId) return;
@@ -85,27 +98,61 @@ export function useCollaborationStore(
   }, [refresh]);
 
   const mergeResult = useMemo(() => {
-    if (!userId || !ownTreeId || accessibleTrees.length === 0) {
+    if (!userId || !ownTreeId || treesForMerge.length === 0) {
       return { virtualMembers: [] as VirtualMember[], conflicts: [], sourceToVirtual: new Map() };
     }
-    return mergeTrees({
-      trees: accessibleTrees,
-      links: memberLinks,
-      anchorTreeId: ownTreeId,
-      anchorMemberId,
-      userId,
-    });
-  }, [accessibleTrees, memberLinks, ownTreeId, anchorMemberId, userId]);
+    try {
+      return mergeTrees({
+        trees: treesForMerge,
+        links: allMemberLinks,
+        anchorTreeId: ownTreeId,
+        anchorMemberId,
+        userId,
+      });
+    } catch (e) {
+      console.error('Failed to merge collaboration trees:', e);
+      return { virtualMembers: [] as VirtualMember[], conflicts: [], sourceToVirtual: new Map() };
+    }
+  }, [treesForMerge, allMemberLinks, ownTreeId, anchorMemberId, userId]);
 
   const mergedMembers = useMemo(
     () => virtualMembersForCanvas(mergeResult.virtualMembers),
     [mergeResult.virtualMembers]
   );
 
-  const linkCandidates = useMemo(
-    () => suggestLinkCandidates(accessibleTrees),
-    [accessibleTrees]
+  const linkCandidates = useMemo(() => {
+    try {
+      return suggestLinkCandidates(treesForMerge);
+    } catch (e) {
+      console.error('Failed to suggest link candidates:', e);
+      return [];
+    }
+  }, [treesForMerge]);
+
+  const importJsonTree = useCallback(
+    (members: FamilyMember[], label = 'Imported tree') => {
+      const normalized = normalizeFamilyMembers(members);
+      const tree: AccessibleTree = {
+        treeId: newImportedTreeId(),
+        name: label,
+        ownerId: 'imported',
+        ownerName: label,
+        role: 'viewer',
+        members: normalized,
+        isOwnTree: false,
+      };
+      setImportedTrees((prev) => [...prev, tree]);
+      return tree;
+    },
+    []
   );
+
+  const removeImportedTree = useCallback((treeId: string) => {
+    setImportedTrees((prev) => prev.filter((t) => t.treeId !== treeId));
+    setLocalMemberLinks((prev) =>
+      prev.filter((l) => l.treeAId !== treeId && l.treeBId !== treeId)
+    );
+  }, []);
 
   useEffect(() => {
     if (mergedMembers.length === 0) return;
@@ -147,16 +194,49 @@ export function useCollaborationStore(
     treeBId: string,
     memberBId: string
   ) => {
+    if (isImportedTreeId(treeAId) || isImportedTreeId(treeBId)) {
+      if (!userId) throw new Error('Not signed in');
+      const link: MemberLink = {
+        id: `local-${crypto.randomUUID()}`,
+        treeAId,
+        memberAId,
+        treeBId,
+        memberBId,
+        status: 'accepted',
+        createdBy: userId,
+      };
+      setLocalMemberLinks((prev) => {
+        const exists = prev.some(
+          (l) =>
+            l.treeAId === treeAId &&
+            l.memberAId === memberAId &&
+            l.treeBId === treeBId &&
+            l.memberBId === memberBId
+        );
+        return exists ? prev : [...prev, link];
+      });
+      return;
+    }
     await createMemberLink(treeAId, memberAId, treeBId, memberBId);
     await refresh();
   };
 
   const acceptLink = async (linkId: string) => {
+    if (linkId.startsWith('local-')) {
+      setLocalMemberLinks((prev) =>
+        prev.map((l) => (l.id === linkId ? { ...l, status: 'accepted' as const } : l))
+      );
+      return;
+    }
     await updateMemberLinkStatus(linkId, 'accepted');
     await refresh();
   };
 
   const rejectLink = async (linkId: string) => {
+    if (linkId.startsWith('local-')) {
+      setLocalMemberLinks((prev) => prev.filter((l) => l.id !== linkId));
+      return;
+    }
     await updateMemberLinkStatus(linkId, 'rejected');
     await refresh();
   };
@@ -186,10 +266,11 @@ export function useCollaborationStore(
   );
 
   return {
-    accessibleTrees,
+    accessibleTrees: treesForMerge,
+    importedTrees,
     familyDirectory,
     incomingCollabRequests,
-    memberLinks,
+    memberLinks: allMemberLinks,
     suggestions,
     loading,
     error,
@@ -207,6 +288,8 @@ export function useCollaborationStore(
     declineCollab,
     cancelCollab,
     disconnectFromUser,
+    importJsonTree,
+    removeImportedTree,
     linkMembers,
     acceptLink,
     rejectLink,

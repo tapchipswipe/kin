@@ -17,6 +17,7 @@ import { TreeCanvas } from './TreeCanvas';
 import { TreeLayout } from '../lib/lineageDb';
 import { sourceBadgeForMember } from '../lib/treeMerge';
 import { downloadFamilyJson } from '../lib/shareBranch';
+import { isImportedTreeId, parseFamilyJsonExport } from '../lib/importFamilyJson';
 import {
   Users,
   Check,
@@ -80,7 +81,8 @@ export interface CollaborationHubProps {
     authorName: string,
     data: Omit<ProposedSuggestion, 'id' | 'status' | 'author' | 'timestamp' | 'treeId'>
   ) => Promise<void>;
-  onImportJson?: (members: FamilyMember[]) => void;
+  onImportJson?: (members: FamilyMember[], label?: string) => void;
+  onRemoveImportedTree?: (treeId: string) => void;
   userDisplayName?: string;
 }
 
@@ -161,6 +163,7 @@ export const CollaborationHub: React.FC<CollaborationHubProps> = ({
   onRefresh,
   onSubmitSuggestion,
   onImportJson,
+  onRemoveImportedTree,
   userDisplayName = 'Contributor',
 }) => {
   const [selectedSuggestion, setSelectedSuggestion] = useState<ProposedSuggestion | null>(null);
@@ -183,7 +186,8 @@ export const CollaborationHub: React.FC<CollaborationHubProps> = ({
     return map;
   }, [virtualMembers]);
 
-  const sharedTrees = accessibleTrees.filter((t) => !t.isOwnTree);
+  const sharedTrees = accessibleTrees.filter((t) => !t.isOwnTree && !isImportedTreeId(t.treeId));
+  const importedJsonTrees = accessibleTrees.filter((t) => isImportedTreeId(t.treeId));
   const pendingLinks = memberLinks.filter((l) => l.status === 'pending');
   const pendingSuggestions = suggestions.filter((s) => s.status === 'pending');
   const focusId = hubFocusId || mergedMembers[0]?.id || '';
@@ -415,7 +419,34 @@ export const CollaborationHub: React.FC<CollaborationHubProps> = ({
             </section>
           )}
 
-          {sharedTrees.length > 0 && (
+          {importedJsonTrees.length > 0 && (
+            <section className="bg-white border border-[#E5E1DA] rounded-xl p-4 space-y-2">
+              <h3 className="font-serif font-bold text-[#2D2926] text-sm">Imported JSON trees</h3>
+              <ul className="space-y-2 text-sm">
+                {importedJsonTrees.map((t) => (
+                  <li
+                    key={t.treeId}
+                    className="flex items-center justify-between gap-2 p-2 rounded-lg bg-[#FAF9F6] border border-[#E5E1DA]"
+                  >
+                    <span className="truncate">
+                      {t.name} ({t.members.length} people)
+                    </span>
+                    {onRemoveImportedTree && (
+                      <button
+                        type="button"
+                        onClick={() => onRemoveImportedTree(t.treeId)}
+                        className="text-xs text-red-600 hover:underline shrink-0"
+                      >
+                        Remove
+                      </button>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+
+          {(sharedTrees.length > 0 || importedJsonTrees.length > 0) && (
             <section className="bg-white border border-[#E5E1DA] rounded-xl p-4 space-y-3">
               <h3 className="font-serif font-bold text-[#2D2926] flex items-center gap-2 text-sm">
                 <Link2 className="w-4 h-4" /> Link same person
@@ -434,7 +465,7 @@ export const CollaborationHub: React.FC<CollaborationHubProps> = ({
                 >
                   {accessibleTrees.map((t) => (
                     <option key={t.treeId} value={t.treeId}>
-                      {t.isOwnTree ? 'My tree' : t.ownerName}
+                      {t.isOwnTree ? 'My tree' : isImportedTreeId(t.treeId) ? t.name : t.ownerName}
                     </option>
                   ))}
                 </select>
@@ -467,7 +498,7 @@ export const CollaborationHub: React.FC<CollaborationHubProps> = ({
                     .filter((t) => t.treeId !== linkTreeA)
                     .map((t) => (
                       <option key={t.treeId} value={t.treeId}>
-                        {t.isOwnTree ? 'My tree' : t.ownerName}
+                        {t.isOwnTree ? 'My tree' : isImportedTreeId(t.treeId) ? t.name : t.ownerName}
                       </option>
                     ))}
                 </select>
@@ -560,16 +591,20 @@ export const CollaborationHub: React.FC<CollaborationHubProps> = ({
                     accept=".json,application/json"
                     onChange={(e) => {
                       const file = e.target.files?.[0];
-                      if (!file) return;
+                      if (!file || !onImportJson) return;
                       const reader = new FileReader();
                       reader.onload = () => {
                         try {
-                          const parsed = JSON.parse(String(reader.result)) as FamilyMember[];
-                          if (Array.isArray(parsed)) onImportJson(parsed);
-                        } catch {
-                          /* ignore */
+                          const parsed = parseFamilyJsonExport(String(reader.result));
+                          onImportJson(parsed, file.name.replace(/\.json$/i, '') || 'Imported tree');
+                          setActionError(null);
+                        } catch (err) {
+                          setActionError(
+                            err instanceof Error ? err.message : 'Could not import JSON file.'
+                          );
                         }
                       };
+                      reader.onerror = () => setActionError('Could not read file.');
                       reader.readAsText(file);
                       e.target.value = '';
                     }}
@@ -589,7 +624,7 @@ export const CollaborationHub: React.FC<CollaborationHubProps> = ({
         </aside>
 
         <div className="xl:col-span-9 space-y-4">
-          {connectedCount === 0 && !loading && (
+          {connectedCount === 0 && importedJsonTrees.length === 0 && !loading && (
             <div className="bg-[#FAF9F6] border border-[#E5E1DA] rounded-xl p-4 text-sm text-[#5C5652] space-y-2">
               <p className="font-semibold text-[#2D2926]">How to expand your family tree here</p>
               <ol className="list-decimal list-inside space-y-1">

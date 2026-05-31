@@ -24,6 +24,7 @@ import { useCollaborationStore } from './hooks/useCollaborationStore';
 import { useAppDialog } from './hooks/useAppDialog';
 import { removeMemberCleanly, findSiblings, getEraLabel } from './utils';
 import { shareBranchWithFamily } from './lib/shareBranch';
+import { normalizeFamilyMembers, parseFamilyJsonExport } from './lib/importFamilyJson';
 import { loadUserProfile, profileNeedsNames } from './lib/profileDb';
 import type { UserProfile } from './types';
 import {
@@ -324,13 +325,19 @@ export default function App() {
   };
 
   const handleImportMembers = (parsed: FamilyMember[]) => {
-    if (Array.isArray(parsed) && parsed.length > 0 && parsed[0].id) {
-      setMembers(synchronizeAllRelationships(parsed));
-      setFocusId(parsed[0].id);
-      toast(`Successfully imported ${parsed.length} family records.`, 'success');
+    try {
+      const normalized = normalizeFamilyMembers(parsed);
+      if (normalized.length === 0 || !normalized[0]?.id) {
+        toast('Invalid file format. Ensure it is a valid list of family member records.', 'error');
+        return;
+      }
+      setMembers(synchronizeAllRelationships(normalized));
+      setFocusId(normalized[0].id);
+      toast(`Successfully imported ${normalized.length} family records.`, 'success');
       dismissOnboarding();
-    } else {
-      toast('Invalid file format. Ensure it is a valid list of family member records.', 'error');
+    } catch (err) {
+      console.error('Import failed:', err);
+      toast(err instanceof Error ? err.message : 'Import failed.', 'error');
     }
   };
 
@@ -341,13 +348,14 @@ export default function App() {
     const reader = new FileReader();
     reader.onload = (event) => {
       try {
-        const parsed = JSON.parse(event.target?.result as string);
+        const parsed = parseFamilyJsonExport(event.target?.result as string);
         handleImportMembers(parsed);
       } catch (err) {
         console.error('Import process crash:', err);
-        toast('Could not parse JSON structure.', 'error');
+        toast(err instanceof Error ? err.message : 'Could not parse JSON structure.', 'error');
       }
     };
+    reader.onerror = () => toast('Could not read file.', 'error');
     reader.readAsText(file);
     e.target.value = '';
   };
@@ -714,7 +722,19 @@ export default function App() {
             onRejectSuggestion={collaboration.rejectSuggestion}
             onRefresh={collaboration.refresh}
             onSubmitSuggestion={collaboration.submitSuggestion}
-            onImportJson={handleImportMembers}
+            onImportJson={(members, label) => {
+              try {
+                const tree = collaboration.importJsonTree(members, label);
+                toast(
+                  `Imported "${tree.name}" with ${tree.members.length} people. Link the shared person below.`,
+                  'success'
+                );
+              } catch (err) {
+                console.error('Hub JSON import failed:', err);
+                toast(err instanceof Error ? err.message : 'Import failed.', 'error');
+              }
+            }}
+            onRemoveImportedTree={collaboration.removeImportedTree}
             userDisplayName={
               userProfile
                 ? `${userProfile.firstName} ${userProfile.lastName}`.trim()
@@ -872,7 +892,7 @@ export default function App() {
                           className="w-12 h-12 rounded-full border border-[#E5E1DA] flex items-center justify-center font-serif font-bold text-white text-lg shrink-0 select-none pb-0.5 shadow-sm"
                           style={{ backgroundColor: activeFocusMember.avatarUrl || '#2D2926' }}
                         >
-                          {activeFocusMember.firstName[0]}
+                          {(activeFocusMember.firstName?.[0] ?? '?').toUpperCase()}
                         </span>
                       );
                     })()}

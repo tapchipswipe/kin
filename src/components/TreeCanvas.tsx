@@ -352,7 +352,7 @@ export const TreeCanvas: React.FC<TreeCanvasProps> = ({
                   className="w-10 h-10 rounded-full border border-[#E5E1DA] flex items-center justify-center font-serif font-bold text-white text-base shrink-0 select-none pb-0.5 shadow-xs"
                   style={{ backgroundColor: member.avatarUrl || '#2D2926' }}
                 >
-                  {member.firstName[0]}
+                  {(member.firstName?.[0] ?? '?').toUpperCase()}
                 </span>
               );
             })()}

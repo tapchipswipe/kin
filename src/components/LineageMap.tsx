@@ -203,7 +203,7 @@ export const LineageMap: React.FC<LineageMapProps> = ({
         } else if (!m.isDeceased) {
           // Living members who have moved from birthplace (e.g. James born in Eugene, relocated to Portland)
           // We can draft a connection to their recorded adult events if there are any
-          const lastEventLoc = m.events[m.events.length - 1]?.location;
+          const lastEventLoc = m.events?.[m.events.length - 1]?.location;
           if (lastEventLoc) {
             endCoords = getCoordinates(lastEventLoc);
           }
@@ -596,7 +596,7 @@ const MarkerWithPopup: React.FC<MarkerProps> = ({
                 className="w-7 h-7 rounded-full text-white font-serif font-bold text-xs flex items-center justify-center select-none shrink-0"
                 style={{ backgroundColor: point.member.avatarUrl || '#7A7570' }}
               >
-                {point.member.firstName[0]}
+                {(point.member.firstName?.[0] ?? '?').toUpperCase()}
               </div>
               <div className="min-w-0">
                 <h4 className="font-bold leading-tight truncate">
