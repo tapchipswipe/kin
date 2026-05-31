@@ -43,6 +43,8 @@ export interface CollaborationSession {
   allowedBranchId?: string; // Specific branch root member ID, rest inherits view-only or no access
 }
 
+export type HeritageSide = 'maternal' | 'paternal' | 'neutral';
+
 export interface FamilyMember {
   id: string;
   firstName: string;
@@ -57,6 +59,13 @@ export interface FamilyMember {
   biography?: string;
   avatarUrl?: string; // Hex color or emoji/image identifier
   occupation?: string;
+
+  /** Which heritage line this member belongs to (maternal / paternal side) */
+  heritageSide?: HeritageSide;
+  /** Custom label e.g. "Puerto Rican side", "Familia materna" */
+  heritageLabel?: string;
+  /** True when this member is the tree anchor (the "you" at the junction) */
+  isAnchor?: boolean;
   
   // Direct relationship pointers
   fatherId?: string | null;

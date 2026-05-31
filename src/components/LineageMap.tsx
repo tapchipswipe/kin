@@ -5,6 +5,11 @@
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { FamilyMember } from '../types';
+import {
+  HeritageFilter,
+  buildHeritageMap,
+  memberMatchesHeritageFilter,
+} from '../lib/heritageUtils';
 import { 
   APIProvider, 
   Map, 
@@ -36,6 +41,8 @@ interface LineageMapProps {
   geocodeCache: Record<string, { lat: number; lng: number }>;
   onGeocodeCacheUpdate: (cache: Record<string, { lat: number; lng: number }>) => void;
   onSelectMember: (id: string) => void;
+  anchorMemberId?: string | null;
+  heritageMode?: boolean;
 }
 
 const API_KEY =
@@ -59,11 +66,24 @@ export const LineageMap: React.FC<LineageMapProps> = ({
   geocodeCache,
   onGeocodeCacheUpdate,
   onSelectMember,
+  anchorMemberId = null,
+  heritageMode = false,
 }) => {
   const [showBirthplaces, setShowBirthplaces] = useState(true);
   const [showDeathplaces, setShowDeathplaces] = useState(true);
   const [showJourneys, setShowJourneys] = useState(true);
   const [selectedMemberId, setSelectedMemberId] = useState<string>('all');
+  const [heritageFilter, setHeritageFilter] = useState<HeritageFilter>('all');
+
+  const heritageMap = useMemo(
+    () => buildHeritageMap(members, anchorMemberId),
+    [members, anchorMemberId]
+  );
+
+  const filteredMembers = useMemo(() => {
+    if (!heritageMode || heritageFilter === 'all' || !anchorMemberId) return members;
+    return members.filter((m) => memberMatchesHeritageFilter(m.id, heritageFilter, heritageMap));
+  }, [members, heritageMode, heritageFilter, anchorMemberId, heritageMap]);
 
   const customGeocodes = geocodeCache;
 
@@ -132,8 +152,7 @@ export const LineageMap: React.FC<LineageMapProps> = ({
   const points = useMemo<PlotData[]>(() => {
     const list: PlotData[] = [];
     
-    members.forEach(m => {
-      // Filter by specific member spotlight if requested
+    filteredMembers.forEach(m => {
       if (selectedMemberId !== 'all' && m.id !== selectedMemberId) return;
 
       if (showBirthplaces && m.birthPlace) {
@@ -166,13 +185,13 @@ export const LineageMap: React.FC<LineageMapProps> = ({
     });
 
     return list;
-  }, [members, showBirthplaces, showDeathplaces, selectedMemberId, customGeocodes]);
+  }, [filteredMembers, showBirthplaces, showDeathplaces, selectedMemberId, customGeocodes]);
 
   // Migration Lines compiled based on matching coordinates
   const migrationLines = useMemo(() => {
     const lines: { id: string; member: FamilyMember; start: {lat: number; lng: number}; end: {lat: number; lng: number} }[] = [];
     
-    members.forEach(m => {
+    filteredMembers.forEach(m => {
       if (selectedMemberId !== 'all' && m.id !== selectedMemberId) return;
 
       if (m.birthPlace && (m.isDeceased ? m.deathPlace : true)) {
@@ -202,7 +221,7 @@ export const LineageMap: React.FC<LineageMapProps> = ({
     });
 
     return lines;
-  }, [members, selectedMemberId, customGeocodes]);
+  }, [filteredMembers, selectedMemberId, customGeocodes]);
 
   // Interactive Marker selection item state
   const [activeInfoWindowPoint, setActiveInfoWindowPoint] = useState<PlotData | null>(null);
@@ -362,6 +381,35 @@ export const LineageMap: React.FC<LineageMapProps> = ({
                 </div>
               </label>
             </div>
+
+            {/* Heritage side filter */}
+            {heritageMode && anchorMemberId && (
+              <div className="pt-4 border-t border-[#E5E1DA] space-y-2">
+                <span className="text-[10px] text-[#A8A29E] tracking-wider uppercase font-mono font-bold block">
+                  Heritage Filter
+                </span>
+                <div className="flex rounded-lg overflow-hidden border border-[#E5E1DA] text-xs">
+                  {(['all', 'maternal', 'paternal'] as const).map((side) => (
+                    <button
+                      key={side}
+                      type="button"
+                      onClick={() => setHeritageFilter(side)}
+                      className={`flex-1 py-1.5 text-center font-bold uppercase text-[8px] tracking-wider border-r border-[#E5E1DA] last:border-r-0 cursor-pointer transition-colors ${
+                        heritageFilter === side
+                          ? side === 'maternal'
+                            ? 'bg-rose-600 text-white'
+                            : side === 'paternal'
+                              ? 'bg-sky-600 text-white'
+                              : 'bg-[#2D2926] text-white'
+                          : 'bg-[#FAF9F6] text-[#7A7570] hover:bg-[#E5E1DA]/40'
+                      }`}
+                    >
+                      {side === 'all' ? 'All' : side === 'maternal' ? 'Mat.' : 'Pat.'}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* Quick Metrics */}
             <div className="pt-4 border-t border-[#E5E1DA] space-y-3">

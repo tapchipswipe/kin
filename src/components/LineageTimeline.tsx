@@ -5,6 +5,11 @@
 
 import React, { useState, useMemo } from 'react';
 import { FamilyMember } from '../types';
+import {
+  HeritageFilter,
+  buildHeritageMap,
+  memberMatchesHeritageFilter,
+} from '../lib/heritageUtils';
 import { Calendar, Search, MapPin, User, ChevronRight, Award, History } from 'lucide-react';
 import { getEraLabel } from '../utils';
 
@@ -12,6 +17,8 @@ interface LineageTimelineProps {
   members: FamilyMember[];
   onSelectMember: (id: string) => void;
   onViewTree: (id: string) => void;
+  anchorMemberId?: string | null;
+  heritageMode?: boolean;
 }
 
 interface UnifiedTimelineEvent {
@@ -29,9 +36,17 @@ export const LineageTimeline: React.FC<LineageTimelineProps> = ({
   members,
   onSelectMember,
   onViewTree,
+  anchorMemberId = null,
+  heritageMode = false,
 }) => {
   const [search, setSearch] = useState('');
   const [selectedType, setSelectedType] = useState<'all' | 'birth' | 'death' | 'milestone'>('all');
+  const [heritageFilter, setHeritageFilter] = useState<HeritageFilter>('all');
+
+  const heritageMap = useMemo(
+    () => buildHeritageMap(members, anchorMemberId),
+    [members, anchorMemberId]
+  );
 
   // Compile and sort all timeline events
   const sortedEvents = useMemo(() => {
@@ -113,6 +128,12 @@ export const LineageTimeline: React.FC<LineageTimelineProps> = ({
       result = result.filter((e) => e.type === selectedType);
     }
 
+    if (heritageMode && heritageFilter !== 'all' && anchorMemberId) {
+      result = result.filter((e) =>
+        memberMatchesHeritageFilter(e.memberId, heritageFilter, heritageMap)
+      );
+    }
+
     if (search.trim() !== '') {
       const q = search.toLowerCase();
       result = result.filter((e) => {
@@ -127,7 +148,7 @@ export const LineageTimeline: React.FC<LineageTimelineProps> = ({
     }
 
     return result;
-  }, [sortedEvents, selectedType, search]);
+  }, [sortedEvents, selectedType, heritageFilter, heritageMode, anchorMemberId, heritageMap, search]);
 
   return (
     <div className="space-y-6">
@@ -186,6 +207,32 @@ export const LineageTimeline: React.FC<LineageTimelineProps> = ({
             </button>
           ))}
         </div>
+
+        {/* Heritage side filter */}
+        {heritageMode && anchorMemberId && (
+          <div className="md:col-span-12 flex rounded-lg overflow-hidden border border-[#E5E1DA] text-xs">
+            <span className="px-3 py-2 bg-[#FAF9F6] text-[#7A7570] font-bold uppercase text-[9px] tracking-wider flex items-center border-r border-[#E5E1DA] shrink-0">
+              Heritage
+            </span>
+            {(['all', 'maternal', 'paternal'] as const).map((side) => (
+              <button
+                key={side}
+                onClick={() => setHeritageFilter(side)}
+                className={`flex-1 py-2 text-center font-bold uppercase text-[9px] tracking-wider border-r border-[#E5E1DA] last:border-r-0 cursor-pointer transition-colors ${
+                  heritageFilter === side
+                    ? side === 'maternal'
+                      ? 'bg-rose-600 text-white'
+                      : side === 'paternal'
+                        ? 'bg-sky-600 text-white'
+                        : 'bg-[#2D2926] text-white'
+                    : 'bg-[#FAF9F6] text-[#7A7570] hover:bg-[#E5E1DA]/40'
+                }`}
+              >
+                {side === 'all' ? 'All Lines' : side === 'maternal' ? 'Maternal' : 'Paternal'}
+              </button>
+            ))}
+          </div>
+        )}
 
         {/* Total found metric */}
         <div className="md:col-span-2 text-right text-xs font-mono font-bold text-[#A8A29E]">
@@ -282,6 +329,7 @@ export const LineageTimeline: React.FC<LineageTimelineProps> = ({
               onClick={() => {
                 setSearch('');
                 setSelectedType('all');
+                setHeritageFilter('all');
               }}
               className="mt-4 px-3.5 py-1.5 bg-[#2D2926] hover:bg-stone-800 text-white text-xs rounded-lg font-semibold cursor-pointer"
             >

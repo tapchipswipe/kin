@@ -5,16 +5,21 @@
 
 import React, { useState, useEffect } from 'react';
 import { useAppDialog } from '../hooks/useAppDialog';
-import { FamilyMember, TimelineEvent } from '../types';
+import { FamilyMember, TimelineEvent, HeritageSide } from '../types';
 import { Save, Plus, Trash2, Calendar, User, Heart, Users, MapPin, Briefcase } from 'lucide-react';
 
 interface MemberFormProps {
   members: FamilyMember[];
   editMemberId: string | null;            // If null, we are in "Create New" mode
-  prefillRelation?: {                     // Optional prefill context from TreeCanvas
+  prefillRelation?: {
     memberId: string;
     type: 'father' | 'mother' | 'spouse' | 'child';
   } | null;
+  prefillHeritage?: {
+    side: HeritageSide;
+    label?: string;
+  } | null;
+  showHeritageFields?: boolean;
   onSave: (member: FamilyMember) => void;
   onCancel: () => void;
 }
@@ -40,6 +45,8 @@ export const MemberForm: React.FC<MemberFormProps> = ({
   members,
   editMemberId,
   prefillRelation,
+  prefillHeritage,
+  showHeritageFields = false,
   onSave,
   onCancel,
 }) => {
@@ -60,6 +67,8 @@ export const MemberForm: React.FC<MemberFormProps> = ({
   const [occupation, setOccupation] = useState('');
   const [biography, setBiography] = useState('');
   const [avatarUrl, setAvatarUrl] = useState(AVATAR_COLORS[0]);
+  const [heritageSide, setHeritageSide] = useState<HeritageSide | ''>('');
+  const [heritageLabel, setHeritageLabel] = useState('');
 
   // Direct relationship configurations
   const [fatherId, setFatherId] = useState<string>('');
@@ -91,6 +100,8 @@ export const MemberForm: React.FC<MemberFormProps> = ({
       setOccupation(targetMember.occupation || '');
       setBiography(targetMember.biography || '');
       setAvatarUrl(targetMember.avatarUrl || AVATAR_COLORS[0]);
+      setHeritageSide(targetMember.heritageSide || '');
+      setHeritageLabel(targetMember.heritageLabel || '');
 
       setFatherId(targetMember.fatherId || '');
       setMotherId(targetMember.motherId || '');
@@ -144,6 +155,8 @@ export const MemberForm: React.FC<MemberFormProps> = ({
       setOccupation('');
       setBiography('');
       setAvatarUrl(AVATAR_COLORS[Math.floor(Math.random() * AVATAR_COLORS.length)]);
+      setHeritageSide(prefillHeritage?.side || '');
+      setHeritageLabel(prefillHeritage?.label || '');
 
       setFatherId(defFather);
       setMotherId(defMother);
@@ -151,7 +164,7 @@ export const MemberForm: React.FC<MemberFormProps> = ({
       setChildrenIds(defChildren);
       setEvents([]);
     }
-  }, [editMemberId, isEditMode, targetMember, prefillRelation, members]);
+  }, [editMemberId, isEditMode, targetMember, prefillRelation, prefillHeritage, members]);
 
   // --- Filtering candidate relatives ---
   // Exclude current member to avoid recursive self-parenting
@@ -212,6 +225,8 @@ export const MemberForm: React.FC<MemberFormProps> = ({
       isDeceased,
       biography: biography.trim() || undefined,
       avatarUrl,
+      heritageSide: heritageSide || undefined,
+      heritageLabel: heritageLabel.trim() || undefined,
       
       fatherId: fatherId || null,
       motherId: motherId || null,
@@ -348,6 +363,34 @@ export const MemberForm: React.FC<MemberFormProps> = ({
             className="w-full text-xs bg-[#FAF9F6] border border-[#E5E1DA] text-[#2D2926] rounded-lg px-3 py-2 focus:ring-1 focus:ring-[#2D2926] focus:border-[#2D2926] outline-hidden outline-none"
           />
         </div>
+
+        {showHeritageFields && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2 border-t border-[#FAF9F6]">
+            <div>
+              <label className="block text-xs font-semibold text-[#2D2926] mb-1">Heritage Line</label>
+              <select
+                value={heritageSide}
+                onChange={(e) => setHeritageSide(e.target.value as HeritageSide | '')}
+                className="w-full text-xs bg-[#FAF9F6] border border-[#E5E1DA] text-[#2D2926] rounded-lg px-3 py-2 focus:ring-1 focus:ring-[#2D2926] focus:border-[#2D2926] outline-hidden outline-none"
+              >
+                <option value="">Not specified</option>
+                <option value="maternal">Maternal line</option>
+                <option value="paternal">Paternal line</option>
+                <option value="neutral">Neutral / junction</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-[#2D2926] mb-1">Heritage Label</label>
+              <input
+                type="text"
+                placeholder='e.g. "Puerto Rican side"'
+                value={heritageLabel}
+                onChange={(e) => setHeritageLabel(e.target.value)}
+                className="w-full text-xs bg-[#FAF9F6] border border-[#E5E1DA] text-[#2D2926] rounded-lg px-3 py-2 focus:ring-1 focus:ring-[#2D2926] focus:border-[#2D2926] outline-hidden outline-none"
+              />
+            </div>
+          </div>
+        )}
       </section>
 
       {/* 2. Chronological Milestones (Birth vs Passing) */}

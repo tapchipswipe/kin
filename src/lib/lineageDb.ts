@@ -6,7 +6,7 @@
 import { FamilyMember } from '../types';
 import { supabase } from './supabase';
 
-export type TreeLayout = 'hierarchical' | 'radial' | 'grid';
+export type TreeLayout = 'hierarchical' | 'radial' | 'grid' | 'dualRoots';
 
 function getSupabaseErrorMessage(error: unknown): string {
   if (error && typeof error === 'object' && 'message' in error) {
@@ -44,6 +44,8 @@ export interface LineageData {
   recentlyVisited: string[];
   blueprintLayout: TreeLayout;
   geocodeCache: Record<string, { lat: number; lng: number }>;
+  anchorMemberId: string | null;
+  heritageMode: boolean;
 }
 
 export async function loadLineageData(userId: string): Promise<LineageData> {
@@ -101,7 +103,7 @@ export async function loadLineageData(userId: string): Promise<LineageData> {
   }
 
   const layout = prefs.blueprint_layout as TreeLayout;
-  const validLayouts: TreeLayout[] = ['hierarchical', 'radial', 'grid'];
+  const validLayouts: TreeLayout[] = ['hierarchical', 'radial', 'grid', 'dualRoots'];
 
   return {
     treeId,
@@ -109,6 +111,8 @@ export async function loadLineageData(userId: string): Promise<LineageData> {
     recentlyVisited: prefs.recently_visited ?? [],
     blueprintLayout: validLayouts.includes(layout) ? layout : 'hierarchical',
     geocodeCache: (prefs.geocode_cache as Record<string, { lat: number; lng: number }>) ?? {},
+    anchorMemberId: prefs.anchor_member_id ?? null,
+    heritageMode: prefs.heritage_mode ?? false,
   };
 }
 
@@ -160,6 +164,8 @@ export async function savePreferences(
     recentlyVisited?: string[];
     blueprintLayout?: TreeLayout;
     geocodeCache?: Record<string, { lat: number; lng: number }>;
+    anchorMemberId?: string | null;
+    heritageMode?: boolean;
   }
 ): Promise<void> {
   const update: Record<string, unknown> = {};
@@ -171,6 +177,12 @@ export async function savePreferences(
   }
   if (prefs.geocodeCache !== undefined) {
     update.geocode_cache = prefs.geocodeCache;
+  }
+  if (prefs.anchorMemberId !== undefined) {
+    update.anchor_member_id = prefs.anchorMemberId;
+  }
+  if (prefs.heritageMode !== undefined) {
+    update.heritage_mode = prefs.heritageMode;
   }
 
   const { error } = await supabase

@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { FamilyMember, MediaAttachment } from './types';
+import { FamilyMember, MediaAttachment, HeritageSide } from './types';
 import { TreeCanvas } from './components/TreeCanvas';
 import { MemberIndex } from './components/MemberIndex';
 import { LineageTimeline } from './components/LineageTimeline';
@@ -55,6 +55,10 @@ export default function App() {
     updateBlueprintLayout,
     geocodeCache,
     updateGeocodeCache,
+    anchorMemberId,
+    updateAnchorMemberId,
+    heritageMode,
+    updateHeritageMode,
     saveStatus,
     loadError,
     clearTree,
@@ -68,6 +72,11 @@ export default function App() {
     memberId: string;
     type: 'father' | 'mother' | 'spouse' | 'child';
   } | null>(null);
+  const [prefillHeritage, setPrefillHeritage] = useState<{
+    side: HeritageSide;
+    label?: string;
+  } | null>(null);
+  const [markAsAnchor, setMarkAsAnchor] = useState(false);
 
   const onboardingKey = user ? `kin_onboarding_dismissed_${user.id}` : '';
   const [onboardingDismissed, setOnboardingDismissed] = useState(false);
@@ -85,8 +94,17 @@ export default function App() {
     setOnboardingDismissed(true);
   };
 
+  const heritageOnboardingIncomplete = useMemo(() => {
+    if (!heritageMode || !anchorMemberId) return false;
+    const anchor = members.find((m) => m.id === anchorMemberId);
+    return Boolean(anchor && (!anchor.motherId || !anchor.fatherId));
+  }, [heritageMode, anchorMemberId, members]);
+
   const showOnboarding =
-    members.length === 0 && !showForm && !onboardingDismissed && activeTab === 'tree';
+    !onboardingDismissed &&
+    activeTab === 'tree' &&
+    !showForm &&
+    (members.length === 0 || heritageOnboardingIncomplete);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -159,18 +177,39 @@ export default function App() {
   };
 
   const handleSaveMember = (savedMember: FamilyMember) => {
+    let member = { ...savedMember };
+    if (markAsAnchor) {
+      member = { ...member, isAnchor: true, heritageSide: 'neutral' };
+      updateAnchorMemberId(member.id);
+    }
+    if (prefillHeritage && !member.heritageSide) {
+      member = {
+        ...member,
+        heritageSide: prefillHeritage.side,
+        heritageLabel: prefillHeritage.label || member.heritageLabel,
+      };
+    }
+
     setMembers((prev) => {
-      const nextList = [...prev];
-      const index = nextList.findIndex((m) => m.id === savedMember.id);
-      if (index >= 0) nextList[index] = savedMember;
-      else nextList.push(savedMember);
+      const nextList = prev.map((m) =>
+        markAsAnchor && m.isAnchor ? { ...m, isAnchor: false } : m
+      );
+      const index = nextList.findIndex((m) => m.id === member.id);
+      if (index >= 0) nextList[index] = member;
+      else nextList.push(member);
       return synchronizeAllRelationships(nextList);
     });
-    setFocusId(savedMember.id);
+    setFocusId(member.id);
     setShowForm(false);
     setEditMemberId(null);
     setPrefillRelation(null);
-    if (members.length === 0) dismissOnboarding();
+    setPrefillHeritage(null);
+    setMarkAsAnchor(false);
+    if (members.length === 0 || (heritageMode && member.isAnchor)) {
+      // keep onboarding visible until dual heritage steps complete
+    } else if (!heritageOnboardingIncomplete) {
+      dismissOnboarding();
+    }
   };
 
   const handleDeleteMember = (targetId: string) => {
@@ -178,24 +217,31 @@ export default function App() {
     setShowForm(false);
   };
 
-  const handleCreateNewMemberRequest = () => {
+  const handleCreateNewMemberRequest = (options?: { asAnchor?: boolean }) => {
     setEditMemberId(null);
     setPrefillRelation(null);
+    setPrefillHeritage(null);
+    setMarkAsAnchor(options?.asAnchor ?? false);
     setShowForm(true);
   };
 
   const handleEditMemberRequest = (id: string) => {
     setEditMemberId(id);
     setPrefillRelation(null);
+    setPrefillHeritage(null);
+    setMarkAsAnchor(false);
     setShowForm(true);
   };
 
   const handleAddRelativeRequest = (
     memberId: string,
-    type: 'father' | 'mother' | 'spouse' | 'child'
+    type: 'father' | 'mother' | 'spouse' | 'child',
+    heritage?: { side: HeritageSide; label?: string }
   ) => {
     setEditMemberId(null);
     setPrefillRelation({ memberId, type });
+    setPrefillHeritage(heritage ?? null);
+    setMarkAsAnchor(false);
     setShowForm(true);
   };
 
@@ -494,19 +540,41 @@ export default function App() {
                   members={members}
                   editMemberId={editMemberId}
                   prefillRelation={prefillRelation}
+                  prefillHeritage={prefillHeritage}
+                  showHeritageFields={heritageMode}
                   onSave={handleSaveMember}
                   onCancel={() => {
                     setShowForm(false);
                     setEditMemberId(null);
                     setPrefillRelation(null);
+                    setPrefillHeritage(null);
+                    setMarkAsAnchor(false);
                   }}
                 />
               </motion.div>
             ) : showOnboarding ? (
               <OnboardingWizard
-                onAddYourself={() => {
-                  dismissOnboarding();
-                  handleCreateNewMemberRequest();
+                members={members}
+                anchorMemberId={anchorMemberId}
+                heritageMode={heritageMode}
+                onStartDualHeritage={() => updateHeritageMode(true)}
+                onStartSingleTree={() => updateHeritageMode(false)}
+                onAddYourself={(options) => {
+                  handleCreateNewMemberRequest(options);
+                }}
+                onAddMaternalSide={(label) => {
+                  if (!anchorMemberId) return;
+                  handleAddRelativeRequest(anchorMemberId, 'mother', {
+                    side: 'maternal',
+                    label,
+                  });
+                }}
+                onAddPaternalSide={(label) => {
+                  if (!anchorMemberId) return;
+                  handleAddRelativeRequest(anchorMemberId, 'father', {
+                    side: 'paternal',
+                    label,
+                  });
                 }}
                 onAddParent={() => {
                   if (members.length === 0) {
@@ -514,8 +582,8 @@ export default function App() {
                     handleCreateNewMemberRequest();
                     return;
                   }
-                  dismissOnboarding();
-                  handleAddRelativeRequest(members[0].id, 'father');
+                  const pivot = anchorMemberId ?? members[0].id;
+                  handleAddRelativeRequest(pivot, 'father');
                 }}
                 onImport={() => {
                   dismissOnboarding();
@@ -529,6 +597,8 @@ export default function App() {
                   <TreeCanvas
                     members={members}
                     focusId={focusId}
+                    anchorMemberId={anchorMemberId}
+                    heritageMode={heritageMode}
                     layout={blueprintLayout}
                     onLayoutChange={updateBlueprintLayout}
                     onSelectFocus={handleSelectMemberFocus}
@@ -550,6 +620,8 @@ export default function App() {
                     members={members}
                     onSelectMember={handleSelectMemberFocus}
                     onViewTree={handleSelectAndTab}
+                    anchorMemberId={anchorMemberId}
+                    heritageMode={heritageMode}
                   />
                 )}
                 {activeTab === 'analytics' && <LineageStats members={members} />}
@@ -559,6 +631,8 @@ export default function App() {
                     geocodeCache={geocodeCache}
                     onGeocodeCacheUpdate={updateGeocodeCache}
                     onSelectMember={handleSelectMemberFocus}
+                    anchorMemberId={anchorMemberId}
+                    heritageMode={heritageMode}
                   />
                 )}
               </div>

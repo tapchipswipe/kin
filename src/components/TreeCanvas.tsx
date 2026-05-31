@@ -5,6 +5,8 @@
 
 import React, { useState, useMemo } from 'react';
 import { FamilyMember } from '../types';
+import { TreeLayout } from '../lib/lineageDb';
+import { HERITAGE_COLORS, buildHeritageMap } from '../lib/heritageUtils';
 import { 
   Heart, 
   Plus, 
@@ -19,15 +21,16 @@ import {
   Orbit,
   LayoutGrid,
   ChevronDown,
-  ChevronUp
+  ChevronUp,
+  GitBranch
 } from 'lucide-react';
 import { motion } from 'motion/react';
-
-type TreeLayout = 'hierarchical' | 'radial' | 'grid';
 
 interface TreeCanvasProps {
   members: FamilyMember[];
   focusId: string;
+  anchorMemberId?: string | null;
+  heritageMode?: boolean;
   layout: TreeLayout;
   onLayoutChange: (layout: TreeLayout) => void;
   onSelectFocus: (id: string) => void;
@@ -38,6 +41,8 @@ interface TreeCanvasProps {
 export const TreeCanvas: React.FC<TreeCanvasProps> = ({
   members,
   focusId,
+  anchorMemberId = null,
+  heritageMode = false,
   layout,
   onLayoutChange,
   onSelectFocus,
@@ -61,8 +66,18 @@ export const TreeCanvas: React.FC<TreeCanvasProps> = ({
     onLayoutChange(newLayout);
   };
 
-  // Find current focus member
+  // Find current focus member (anchor takes precedence in dualRoots layout)
   const focusMember = members.find((m) => m.id === focusId);
+  const anchorMember = anchorMemberId ? members.find((m) => m.id === anchorMemberId) : null;
+  const centerMember =
+    layout === 'dualRoots' && anchorMember ? anchorMember : focusMember;
+
+  const heritageMap = useMemo(
+    () => buildHeritageMap(members, anchorMemberId ?? null),
+    [members, anchorMemberId]
+  );
+
+  const getHeritageSideFor = (memberId: string) => heritageMap.get(memberId) ?? 'neutral';
 
   if (members.length === 0) {
     return (
@@ -85,7 +100,7 @@ export const TreeCanvas: React.FC<TreeCanvasProps> = ({
     );
   }
 
-  if (!focusMember) {
+  if (!centerMember) {
     return (
       <div className="flex flex-col items-center justify-center h-96 border-2 border-dashed border-stone-300 rounded-2xl bg-stone-50 text-stone-500 p-8 text-center">
         <Users className="w-12 h-12 mb-4 text-stone-400 animate-bounce" />
@@ -95,9 +110,9 @@ export const TreeCanvas: React.FC<TreeCanvasProps> = ({
     );
   }
 
-  // --- Resolve Nodes surrounding the focus ---
-  const father = focusMember.fatherId ? members.find((m) => m.id === focusMember.fatherId) : null;
-  const mother = focusMember.motherId ? members.find((m) => m.id === focusMember.motherId) : null;
+  // --- Resolve Nodes surrounding the center ---
+  const father = centerMember.fatherId ? members.find((m) => m.id === centerMember.fatherId) : null;
+  const mother = centerMember.motherId ? members.find((m) => m.id === centerMember.motherId) : null;
 
   // Grandparents
   const paternalGrandfather = father?.fatherId ? members.find((m) => m.id === father.fatherId) : null;
@@ -106,18 +121,16 @@ export const TreeCanvas: React.FC<TreeCanvasProps> = ({
   const maternalGrandmother = mother?.motherId ? members.find((m) => m.id === mother.motherId) : null;
 
   // Spouses
-  const spouses = members.filter((m) => focusMember.spouseIds.includes(m.id));
+  const spouses = members.filter((m) => centerMember.spouseIds.includes(m.id));
 
-  // Siblings (share same mother or father)
   const siblings = members.filter((m) => {
-    if (m.id === focusMember.id) return false;
-    const sameFather = focusMember.fatherId && m.fatherId === focusMember.fatherId;
-    const sameMother = focusMember.motherId && m.motherId === focusMember.motherId;
+    if (m.id === centerMember.id) return false;
+    const sameFather = centerMember.fatherId && m.fatherId === centerMember.fatherId;
+    const sameMother = centerMember.motherId && m.motherId === centerMember.motherId;
     return sameFather || sameMother;
   });
 
-  // Children
-  const children = members.filter((m) => focusMember.childrenIds.includes(m.id));
+  const children = members.filter((m) => centerMember.childrenIds.includes(m.id));
 
   // Helper helper to format dates beautifully
   const getYearSpan = (m: FamilyMember) => {
@@ -134,7 +147,7 @@ export const TreeCanvas: React.FC<TreeCanvasProps> = ({
     const list: { member: FamilyMember; role: string; r: number; angle: number }[] = [];
 
     // Focus center is always origin (r=0)
-    list.push({ member: focusMember, role: 'Focus Center', r: 0, angle: 0 });
+    list.push({ member: centerMember, role: 'Focus Center', r: 0, angle: 0 });
 
     // Inner Circle (Ring 1, r=130)
     if (father) {
@@ -201,7 +214,7 @@ export const TreeCanvas: React.FC<TreeCanvasProps> = ({
 
     return list;
   }, [
-    focusMember,
+    centerMember,
     father,
     mother,
     spouses,
@@ -250,6 +263,7 @@ export const TreeCanvas: React.FC<TreeCanvasProps> = ({
     isCollapsed = false,
     onToggleCollapse,
     hasCollapsibleChildren = false,
+    sideAccent,
   }: {
     member: FamilyMember;
     roleLabel: string;
@@ -257,8 +271,11 @@ export const TreeCanvas: React.FC<TreeCanvasProps> = ({
     isCollapsed?: boolean;
     onToggleCollapse?: (id: string, e: React.MouseEvent) => void;
     hasCollapsibleChildren?: boolean;
+    sideAccent?: 'maternal' | 'paternal' | 'neutral';
     key?: any;
   }) => {
+    const side = sideAccent ?? getHeritageSideFor(member.id);
+    const accent = HERITAGE_COLORS[side];
     return (
       <motion.div
         whileHover={{ 
@@ -272,8 +289,8 @@ export const TreeCanvas: React.FC<TreeCanvasProps> = ({
         className={`relative p-4 rounded-lg border bg-white text-left cursor-pointer overflow-hidden shadow-xs group ${
           isActive
             ? 'border-[#2D2926] ring-1 ring-[#2D2926]'
-            : 'border-[#E5E1DA]'
-        }`}
+            : accent.border
+        } ${heritageMode && side !== 'neutral' ? accent.bg : ''}`}
         onClick={() => onSelectFocus(member.id)}
       >
         <div>
@@ -281,6 +298,11 @@ export const TreeCanvas: React.FC<TreeCanvasProps> = ({
             <span className="text-[9px] uppercase tracking-widest font-bold text-[#A8A29E]">
               {roleLabel}
             </span>
+            {member.heritageLabel && (
+              <span className={`text-[8px] px-1.5 py-0.5 rounded font-bold ${accent.text} ${accent.bg} border ${accent.border}`}>
+                {member.heritageLabel}
+              </span>
+            )}
             <div className="flex items-center gap-1.5">
               {hasCollapsibleChildren && onToggleCollapse && (
                 <button
@@ -395,26 +417,26 @@ export const TreeCanvas: React.FC<TreeCanvasProps> = ({
       <div className="bg-white rounded-xl p-6 border border-[#E5E1DA] flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <span className="text-[10px] px-2.5 py-1 rounded bg-[#FAF9F6] border border-[#E5E1DA] text-[#7A7570] font-bold tracking-widest inline-block mb-2 uppercase">
-            Active Focus Center
+            {layout === 'dualRoots' && anchorMember ? 'Heritage Junction' : 'Active Focus Center'}
           </span>
           <h2 className="text-2xl font-serif font-bold text-[#2D2926]">
-            {focusMember.firstName} {focusMember.lastName}
-            {focusMember.maidenName && <span className="font-sans font-normal text-[#7A7570] text-lg"> (née {focusMember.maidenName})</span>}
+            {centerMember.firstName} {centerMember.lastName}
+            {centerMember.maidenName && <span className="font-sans font-normal text-[#7A7570] text-lg"> (née {centerMember.maidenName})</span>}
           </h2>
           <p className="text-xs text-[#7A7570] mt-1 font-mono">
-            REC: {focusMember.id} &bull; {focusMember.gender.toUpperCase()} &bull; {getYearSpan(focusMember)}
+            REC: {centerMember.id} &bull; {centerMember.gender.toUpperCase()} &bull; {getYearSpan(centerMember)}
           </p>
         </div>
         <div className="flex items-center gap-2 self-start md:self-center shrink-0 print:hidden">
           <button
-            onClick={() => onAddRelativeRequest(focusMember.id, 'spouse')}
+            onClick={() => onAddRelativeRequest(centerMember.id, 'spouse')}
             className="px-3.5 py-1.5 text-xs font-semibold border border-[#E5E1DA] rounded-lg hover:bg-[#FAF9F6] text-[#2D2926] flex items-center gap-1.5 cursor-pointer leading-snug"
           >
             <Heart className="w-3.5 h-3.5 text-rose-500" />
             Add Spouse
           </button>
           <button
-            onClick={() => onAddRelativeRequest(focusMember.id, 'child')}
+            onClick={() => onAddRelativeRequest(centerMember.id, 'child')}
             className="px-3.5 py-1.5 text-xs font-semibold border border-[#E5E1DA] rounded-lg hover:bg-[#FAF9F6] text-[#2D2926] flex items-center gap-1.5 cursor-pointer leading-snug"
           >
             <Plus className="w-3.5 h-3.5 text-[#2D2926]" />
@@ -451,6 +473,19 @@ export const TreeCanvas: React.FC<TreeCanvasProps> = ({
             <Orbit className="w-3.5 h-3.5" />
             Radial Constellation
           </button>
+          {heritageMode && (
+            <button
+              onClick={() => handleSetLayout('dualRoots')}
+              className={`px-3 py-1.5 rounded-md text-xs font-bold font-sans transition-all flex items-center gap-1.5 cursor-pointer ${
+                layout === 'dualRoots'
+                  ? 'bg-[#2D2926] text-white'
+                  : 'text-[#7A7570] hover:text-[#2D2926] hover:bg-stone-50'
+              }`}
+            >
+              <GitBranch className="w-3.5 h-3.5" />
+              Dual Roots
+            </button>
+          )}
           <button
             onClick={() => handleSetLayout('grid')}
             className={`px-3 py-1.5 rounded-md text-xs font-bold font-sans transition-all flex items-center gap-1.5 cursor-pointer ${
@@ -550,7 +585,7 @@ export const TreeCanvas: React.FC<TreeCanvasProps> = ({
             <div className="flex items-center gap-2">
               <span className="h-[1px] bg-[#E5E1DA] grow" />
               <h3 className="text-[10px] font-bold tracking-widest text-[#A8A29E] uppercase flex items-center gap-1.5">
-                <ArrowUp className="w-3.5 h-3.5" /> Parents of {focusMember.firstName}
+                <ArrowUp className="w-3.5 h-3.5" /> Parents of {centerMember.firstName}
               </h3>
               <span className="h-[1px] bg-[#E5E1DA] grow" />
             </div>
@@ -567,7 +602,7 @@ export const TreeCanvas: React.FC<TreeCanvasProps> = ({
                     onToggleCollapse={handleToggleCollapse}
                   />
                 ) : (
-                  <EmptyPlaceholderNode targetId={focusMember.id} type="father" label="Add Father" />
+                  <EmptyPlaceholderNode targetId={centerMember.id} type="father" label="Add Father" />
                 )}
               </div>
 
@@ -582,7 +617,7 @@ export const TreeCanvas: React.FC<TreeCanvasProps> = ({
                     onToggleCollapse={handleToggleCollapse}
                   />
                 ) : (
-                  <EmptyPlaceholderNode targetId={focusMember.id} type="mother" label="Add Mother" />
+                  <EmptyPlaceholderNode targetId={centerMember.id} type="mother" label="Add Mother" />
                 )}
               </div>
             </div>
@@ -621,7 +656,7 @@ export const TreeCanvas: React.FC<TreeCanvasProps> = ({
                 <div className="lg:col-span-5 print:col-span-5 flex flex-col justify-center">
                   <div className="space-y-2">
                     <span className="text-[9px] font-bold text-[#7A7570] text-center block uppercase tracking-widest">Selected Member Focus</span>
-                    <MemberNode member={focusMember} roleLabel="Focus Member" isActive={true} />
+                    <MemberNode member={centerMember} roleLabel="Focus Member" isActive={true} />
                   </div>
                 </div>
 
@@ -634,7 +669,7 @@ export const TreeCanvas: React.FC<TreeCanvasProps> = ({
                         <MemberNode key={sp.id} member={sp} roleLabel="Spouse" />
                       ))
                     ) : (
-                      <EmptyPlaceholderNode targetId={focusMember.id} type="spouse" label="Add Spouse to Chart" />
+                      <EmptyPlaceholderNode targetId={centerMember.id} type="spouse" label="Add Spouse to Chart" />
                     )}
                   </div>
                 </div>
@@ -648,7 +683,7 @@ export const TreeCanvas: React.FC<TreeCanvasProps> = ({
             <div className="flex items-center gap-2">
               <span className="h-[1px] bg-[#E5E1DA] grow" />
               <h3 className="text-[10px] font-bold tracking-widest text-[#A8A29E] uppercase flex items-center gap-1.5">
-                <ArrowDown className="w-3.5 h-3.5" /> Children of {focusMember.firstName} ({children.length})
+                <ArrowDown className="w-3.5 h-3.5" /> Children of {centerMember.firstName} ({children.length})
               </h3>
               <span className="h-[1px] bg-[#E5E1DA] grow" />
             </div>
@@ -667,12 +702,12 @@ export const TreeCanvas: React.FC<TreeCanvasProps> = ({
                 ))
               ) : (
                 <div className="col-span-full max-w-sm mx-auto w-full">
-                  <EmptyPlaceholderNode targetId={focusMember.id} type="child" label="Add First Child" />
+                  <EmptyPlaceholderNode targetId={centerMember.id} type="child" label="Add First Child" />
                 </div>
               )}
               {children.length > 0 && (
                 <div className="col-span-1 min-h-[105px]">
-                  <EmptyPlaceholderNode targetId={focusMember.id} type="child" label="Add Another Child" />
+                  <EmptyPlaceholderNode targetId={centerMember.id} type="child" label="Add Another Child" />
                 </div>
               )}
             </div>
@@ -800,7 +835,7 @@ export const TreeCanvas: React.FC<TreeCanvasProps> = ({
       {layout === 'grid' && (
         <div className="space-y-6">
           <div className="bg-[#FAF9F6] border border-[#E5E1DA] rounded-xl p-4 text-[#7A7570] text-xs text-left">
-            Compact grouped list of all active relatives in <strong>{focusMember.firstName}'s</strong> immediate lineage. Click any card to set them as the focus member.
+            Compact grouped list of all active relatives in <strong>{centerMember.firstName}'s</strong> immediate lineage. Click any card to set them as the focus member.
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 print:grid-cols-4 gap-6">
@@ -882,6 +917,122 @@ export const TreeCanvas: React.FC<TreeCanvasProps> = ({
             </div>
 
           </div>
+        </div>
+      )}
+
+      {layout === 'dualRoots' && (
+        <div className="space-y-8 relative">
+          <div className="text-center text-xs text-[#7A7570] bg-[#FAF9F6] border border-[#E5E1DA] rounded-xl p-4 max-w-2xl mx-auto">
+            Both heritage lines meet here. Build each branch upward — maternal on the left, paternal on the right.
+          </div>
+
+          {/* Grandparents row — split by side */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+            {/* Maternal branch */}
+            <section className="space-y-4 rounded-xl border-2 border-rose-200 bg-rose-50/30 p-5">
+              <h3 className="text-[10px] font-bold tracking-widest text-rose-700 uppercase text-center flex items-center justify-center gap-1.5">
+                <Award className="w-3.5 h-3.5" />
+                {mother?.heritageLabel || 'Maternal Line'}
+              </h3>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-2">
+                  <span className="text-[9px] font-bold tracking-widest text-rose-600 block text-center">GRANDFATHER</span>
+                  {maternalGrandfather ? (
+                    <MemberNode member={maternalGrandfather} roleLabel="Grandfather" sideAccent="maternal" />
+                  ) : (
+                    <EmptyPlaceholderNode targetId={mother?.id || centerMember.id} type="father" label="Add Grandfather" />
+                  )}
+                </div>
+                <div className="space-y-2">
+                  <span className="text-[9px] font-bold tracking-widest text-rose-600 block text-center">GRANDMOTHER</span>
+                  {maternalGrandmother ? (
+                    <MemberNode member={maternalGrandmother} roleLabel="Grandmother" sideAccent="maternal" />
+                  ) : (
+                    <EmptyPlaceholderNode targetId={mother?.id || centerMember.id} type="mother" label="Add Grandmother" />
+                  )}
+                </div>
+              </div>
+              <div className="space-y-2 pt-2">
+                <span className="text-[9px] font-bold tracking-widest text-rose-600 block text-center">MOTHER</span>
+                {mother ? (
+                  <MemberNode member={mother} roleLabel="Mother" sideAccent="maternal" />
+                ) : (
+                  <EmptyPlaceholderNode targetId={centerMember.id} type="mother" label="Add Mother" />
+                )}
+              </div>
+            </section>
+
+            {/* Paternal branch */}
+            <section className="space-y-4 rounded-xl border-2 border-sky-200 bg-sky-50/30 p-5">
+              <h3 className="text-[10px] font-bold tracking-widest text-sky-700 uppercase text-center flex items-center justify-center gap-1.5">
+                <Award className="w-3.5 h-3.5" />
+                {father?.heritageLabel || 'Paternal Line'}
+              </h3>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-2">
+                  <span className="text-[9px] font-bold tracking-widest text-sky-600 block text-center">GRANDFATHER</span>
+                  {paternalGrandfather ? (
+                    <MemberNode member={paternalGrandfather} roleLabel="Grandfather" sideAccent="paternal" />
+                  ) : (
+                    <EmptyPlaceholderNode targetId={father?.id || centerMember.id} type="father" label="Add Grandfather" />
+                  )}
+                </div>
+                <div className="space-y-2">
+                  <span className="text-[9px] font-bold tracking-widest text-sky-600 block text-center">GRANDMOTHER</span>
+                  {paternalGrandmother ? (
+                    <MemberNode member={paternalGrandmother} roleLabel="Grandmother" sideAccent="paternal" />
+                  ) : (
+                    <EmptyPlaceholderNode targetId={father?.id || centerMember.id} type="mother" label="Add Grandmother" />
+                  )}
+                </div>
+              </div>
+              <div className="space-y-2 pt-2">
+                <span className="text-[9px] font-bold tracking-widest text-sky-600 block text-center">FATHER</span>
+                {father ? (
+                  <MemberNode member={father} roleLabel="Father" sideAccent="paternal" />
+                ) : (
+                  <EmptyPlaceholderNode targetId={centerMember.id} type="father" label="Add Father" />
+                )}
+              </div>
+            </section>
+          </div>
+
+          {/* Junction — anchor at center */}
+          <section className="space-y-4">
+            <div className="flex items-center gap-2">
+              <span className="h-[1px] bg-gradient-to-r from-rose-300 via-[#E5E1DA] to-sky-300 grow" />
+              <h3 className="text-[10px] font-bold tracking-widest text-[#2D2926] uppercase flex items-center gap-1.5">
+                <GitBranch className="w-3.5 h-3.5" /> Where Heritages Meet
+              </h3>
+              <span className="h-[1px] bg-gradient-to-r from-sky-300 via-[#E5E1DA] to-rose-300 grow" />
+            </div>
+            <div className="max-w-md mx-auto">
+              <MemberNode
+                member={centerMember}
+                roleLabel={centerMember.isAnchor ? 'You — Anchor' : 'Heritage Junction'}
+                isActive={true}
+                sideAccent="neutral"
+              />
+            </div>
+          </section>
+
+          {/* Children below */}
+          {children.length > 0 && (
+            <section className="space-y-4">
+              <div className="flex items-center gap-2">
+                <span className="h-[1px] bg-[#E5E1DA] grow" />
+                <h3 className="text-[10px] font-bold tracking-widest text-[#A8A29E] uppercase flex items-center gap-1.5">
+                  <ArrowDown className="w-3.5 h-3.5" /> Descendants
+                </h3>
+                <span className="h-[1px] bg-[#E5E1DA] grow" />
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                {children.map((child) => (
+                  <MemberNode key={child.id} member={child} roleLabel="Child" />
+                ))}
+              </div>
+            </section>
+          )}
         </div>
       )}
     </div>

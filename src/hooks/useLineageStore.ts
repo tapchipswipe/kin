@@ -22,6 +22,8 @@ export function useLineageStore(userId: string | undefined) {
   const [recentlyVisited, setRecentlyVisited] = useState<string[]>([]);
   const [blueprintLayout, setBlueprintLayout] = useState<TreeLayout>('hierarchical');
   const [geocodeCache, setGeocodeCache] = useState<Record<string, { lat: number; lng: number }>>({});
+  const [anchorMemberId, setAnchorMemberId] = useState<string | null>(null);
+  const [heritageMode, setHeritageMode] = useState(false);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
   const [loadError, setLoadError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
@@ -39,6 +41,8 @@ export function useLineageStore(userId: string | undefined) {
       setRecentlyVisited([]);
       setBlueprintLayout('hierarchical');
       setGeocodeCache({});
+      setAnchorMemberId(null);
+      setHeritageMode(false);
       setSaveStatus('idle');
       return;
     }
@@ -52,10 +56,16 @@ export function useLineageStore(userId: string | undefined) {
         if (cancelled) return;
         setTreeId(data.treeId);
         setMembers(data.members);
-        setFocusId(data.members[0]?.id ?? '');
         setRecentlyVisited(data.recentlyVisited);
         setBlueprintLayout(data.blueprintLayout);
         setGeocodeCache(data.geocodeCache);
+        setAnchorMemberId(data.anchorMemberId);
+        setHeritageMode(data.heritageMode);
+        const initialFocus =
+          data.anchorMemberId && data.members.some((m) => m.id === data.anchorMemberId)
+            ? data.anchorMemberId
+            : data.members[0]?.id ?? '';
+        setFocusId(initialFocus);
         setSaveStatus('saved');
         skipMembersSave.current = true;
         skipPrefsSave.current = true;
@@ -113,6 +123,8 @@ export function useLineageStore(userId: string | undefined) {
       recentlyVisited?: string[];
       blueprintLayout?: TreeLayout;
       geocodeCache?: Record<string, { lat: number; lng: number }>;
+      anchorMemberId?: string | null;
+      heritageMode?: boolean;
     }) => {
       if (!userId || skipPrefsSave.current) {
         skipPrefsSave.current = false;
@@ -156,11 +168,34 @@ export function useLineageStore(userId: string | undefined) {
     [schedulePrefsSave]
   );
 
+  const updateAnchorMemberId = useCallback(
+    (id: string | null) => {
+      setAnchorMemberId(id);
+      schedulePrefsSave({ anchorMemberId: id });
+    },
+    [schedulePrefsSave]
+  );
+
+  const updateHeritageMode = useCallback(
+    (enabled: boolean) => {
+      setHeritageMode(enabled);
+      if (enabled) {
+        setBlueprintLayout('dualRoots');
+        schedulePrefsSave({ heritageMode: enabled, blueprintLayout: 'dualRoots' });
+      } else {
+        schedulePrefsSave({ heritageMode: enabled });
+      }
+    },
+    [schedulePrefsSave]
+  );
+
   const clearTree = useCallback(async () => {
     if (!treeId) return;
     await clearAllMembers(treeId);
     setMembers([]);
     setFocusId('');
+    setAnchorMemberId(null);
+    setHeritageMode(false);
   }, [treeId]);
 
   return {
@@ -175,6 +210,10 @@ export function useLineageStore(userId: string | undefined) {
     updateBlueprintLayout,
     geocodeCache,
     updateGeocodeCache,
+    anchorMemberId,
+    updateAnchorMemberId,
+    heritageMode,
+    updateHeritageMode,
     saveStatus,
     loadError,
     clearTree,
