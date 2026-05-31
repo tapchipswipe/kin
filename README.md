@@ -9,6 +9,23 @@ A cloud-backed family lineage archive. Record ancestors, build interactive famil
 - **Deployment:** Vercel (static SPA + serverless API)
 - **AI:** Gemini portrait sketch generation
 
+## Production Checklist
+
+Complete these steps once when deploying to production:
+
+- [ ] **Run database migrations** in Supabase SQL Editor (in order):
+  1. [`supabase/migrations/20260531120000_initial_schema.sql`](supabase/migrations/20260531120000_initial_schema.sql)
+  2. [`supabase/migrations/20260531120100_backfill_existing_users.sql`](supabase/migrations/20260531120100_backfill_existing_users.sql)
+- [ ] **Set Vercel environment variables** (Production + Preview):
+  - `VITE_SUPABASE_URL` — your Supabase project URL
+  - `VITE_SUPABASE_ANON_KEY` — your Supabase anon/public key
+  - `GEMINI_API_KEY` — for AI portrait sketches (optional)
+  - `GOOGLE_MAPS_PLATFORM_KEY` — for geographic atlas (optional)
+- [ ] **Redeploy** after adding env vars (Vite inlines them at build time)
+- [ ] **Verify** — sign up, sign in, add a member, confirm "Saved to cloud" appears
+
+If using the [Vercel Supabase integration](https://vercel.com/integrations/supabase), it may provision `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY`. The app reads those as fallbacks, but setting the `VITE_` names explicitly is recommended.
+
 ## Local Development
 
 **Prerequisites:** Node.js 20+, a Supabase project
@@ -34,13 +51,7 @@ A cloud-backed family lineage archive. Record ancestors, build interactive famil
    | `GEMINI_API_KEY` | Google Gemini API key (server-side) |
    | `GOOGLE_MAPS_PLATFORM_KEY` | Google Maps API key (optional) |
 
-4. Apply the database migration to your Supabase project:
-
-   ```bash
-   npx supabase db push
-   ```
-
-   Or run the SQL in [`supabase/migrations/20260531120000_initial_schema.sql`](supabase/migrations/20260531120000_initial_schema.sql) via the Supabase SQL editor.
+4. Apply the database migrations (see Production Checklist above).
 
 5. Start the dev server:
 
@@ -53,14 +64,9 @@ A cloud-backed family lineage archive. Record ancestors, build interactive famil
 ## Deploy to Vercel
 
 1. Connect the GitHub repo to Vercel.
-2. Link your Supabase project via the [Vercel Marketplace integration](https://vercel.com/integrations/supabase) — this auto-provisions `SUPABASE_URL` and keys.
-3. Map env vars in Vercel (Supabase integration may use `NEXT_PUBLIC_` prefix; map to `VITE_` for this Vite app):
-   - `VITE_SUPABASE_URL` = your Supabase URL
-   - `VITE_SUPABASE_ANON_KEY` = your Supabase anon key
-4. Add remaining secrets:
-   - `GEMINI_API_KEY`
-   - `GOOGLE_MAPS_PLATFORM_KEY` (optional)
-5. Deploy — Vercel uses [`vercel.json`](vercel.json) for SPA routing and the `/api/generate-sketch` serverless function.
+2. Link your Supabase project via the [Vercel Marketplace integration](https://vercel.com/integrations/supabase).
+3. Set env vars (see Production Checklist).
+4. Deploy — Vercel uses [`vercel.json`](vercel.json) for SPA routing and the `/api/generate-sketch` serverless function.
 
 ## Database Schema
 
@@ -75,6 +81,7 @@ Row Level Security is enabled on all tables. Users can only access their own dat
 ## Features
 
 - Email + password authentication
+- First-run onboarding wizard
 - Interactive family tree (hierarchical, radial, grid layouts)
 - Member index, timeline, analytics, and geographic atlas
 - JSON import/export for portability

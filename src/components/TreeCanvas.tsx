@@ -32,6 +32,7 @@ interface TreeCanvasProps {
   onLayoutChange: (layout: TreeLayout) => void;
   onSelectFocus: (id: string) => void;
   onAddRelativeRequest: (memberId: string, type: 'father' | 'mother' | 'spouse' | 'child') => void;
+  onRegisterFirst?: () => void;
 }
 
 export const TreeCanvas: React.FC<TreeCanvasProps> = ({
@@ -41,6 +42,7 @@ export const TreeCanvas: React.FC<TreeCanvasProps> = ({
   onLayoutChange,
   onSelectFocus,
   onAddRelativeRequest,
+  onRegisterFirst,
 }) => {
 
   const [collapsedNodes, setCollapsedNodes] = useState<Set<string>>(new Set());
@@ -61,6 +63,27 @@ export const TreeCanvas: React.FC<TreeCanvasProps> = ({
 
   // Find current focus member
   const focusMember = members.find((m) => m.id === focusId);
+
+  if (members.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center h-96 border-2 border-dashed border-[#E5E1DA] rounded-2xl bg-[#FAF9F6] text-[#7A7570] p-8 text-center">
+        <Users className="w-12 h-12 mb-4 text-[#A8A29E]" />
+        <h3 className="text-xl font-serif font-medium text-[#2D2926]">Your tree is empty</h3>
+        <p className="text-sm mt-2 max-w-sm leading-relaxed">
+          Add your first family member to start building your lineage chart.
+        </p>
+        {onRegisterFirst && (
+          <button
+            onClick={onRegisterFirst}
+            className="mt-6 px-5 py-2.5 bg-[#2D2926] text-white rounded-lg text-sm font-bold hover:bg-[#1C1A18] cursor-pointer flex items-center gap-2"
+          >
+            <Plus className="w-4 h-4" />
+            Add First Member
+          </button>
+        )}
+      </div>
+    );
+  }
 
   if (!focusMember) {
     return (

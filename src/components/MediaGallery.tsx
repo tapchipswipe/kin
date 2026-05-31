@@ -4,6 +4,7 @@
  */
 
 import React, { useState, useRef } from 'react';
+import { useAppDialog } from '../hooks/useAppDialog';
 import { FamilyMember, MediaAttachment, TimelineEvent } from '../types';
 import { 
   FileText, 
@@ -43,6 +44,7 @@ export const MediaGallery: React.FC<MediaGalleryProps> = ({
   userId,
   treeId,
 }) => {
+  const { toast, confirm } = useAppDialog();
   const mediaList = member.media || [];
   const events = member.events || [];
 
@@ -138,7 +140,7 @@ export const MediaGallery: React.FC<MediaGalleryProps> = ({
 
       onUpdateMedia([...mediaList, newAttachment]);
     } catch (e: unknown) {
-      alert(e instanceof Error ? e.message : 'Failed to generate sketch');
+      toast(e instanceof Error ? e.message : 'Failed to generate sketch', 'error');
     } finally {
       setIsGenerating(false);
     }
@@ -187,7 +189,7 @@ export const MediaGallery: React.FC<MediaGalleryProps> = ({
         const file = new File([blob], newMediaName, { type: blob.type });
         url = await uploadMediaFile(userId, treeId, file, mediaId);
       } catch (err) {
-        alert(err instanceof Error ? err.message : 'Upload failed');
+        toast(err instanceof Error ? err.message : 'Upload failed', 'error');
         return;
       }
     }
@@ -213,9 +215,12 @@ export const MediaGallery: React.FC<MediaGalleryProps> = ({
     setIsUploading(false);
   };
 
-  const handleDeleteMedia = (id: string, e: React.MouseEvent) => {
+  const handleDeleteMedia = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (confirm('Are you sure you want to delete this historical media credential? This action is irreversible.')) {
+    const ok = await confirm(
+      'Are you sure you want to delete this historical media credential? This action is irreversible.'
+    );
+    if (!ok) return;
       const item = mediaList.find((m) => m.id === id);
       if (item && isStorageUrl(item.url)) {
         deleteMediaFile(item.url);
@@ -225,7 +230,6 @@ export const MediaGallery: React.FC<MediaGalleryProps> = ({
       if (activePreview?.id === id) {
         setActivePreview(null);
       }
-    }
   };
 
   // Helper of associated event details

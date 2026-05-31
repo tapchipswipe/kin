@@ -4,6 +4,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
+import { useAppDialog } from '../hooks/useAppDialog';
 import { FamilyMember, TimelineEvent } from '../types';
 import { Save, Plus, Trash2, Calendar, User, Heart, Users, MapPin, Briefcase } from 'lucide-react';
 
@@ -42,6 +43,7 @@ export const MemberForm: React.FC<MemberFormProps> = ({
   onSave,
   onCancel,
 }) => {
+  const { toast } = useAppDialog();
   const isEditMode = !!editMemberId;
   const targetMember = isEditMode ? members.find((m) => m.id === editMemberId) : null;
 
@@ -193,7 +195,7 @@ export const MemberForm: React.FC<MemberFormProps> = ({
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (firstName.trim() === '' || lastName.trim() === '') {
-      alert('First Name and Last Name are required.');
+      toast('First Name and Last Name are required.', 'error');
       return;
     }
 

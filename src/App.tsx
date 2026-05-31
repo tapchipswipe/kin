@@ -14,8 +14,10 @@ import { RecentlyVisited } from './components/RecentlyVisited';
 import { LineageStats } from './components/LineageStats';
 import { LineageMap } from './components/LineageMap';
 import { AuthScreen } from './components/AuthScreen';
+import { OnboardingWizard } from './components/OnboardingWizard';
 import { useAuth } from './hooks/useAuth';
 import { useLineageStore } from './hooks/useLineageStore';
+import { useAppDialog } from './hooks/useAppDialog';
 import { removeMemberCleanly, findSiblings, getEraLabel } from './utils';
 import {
   Network,
@@ -40,6 +42,7 @@ import { motion } from 'motion/react';
 
 export default function App() {
   const { user, loading: authLoading, signOut } = useAuth();
+  const { toast, confirm } = useAppDialog();
   const {
     treeId,
     members,
@@ -55,6 +58,7 @@ export default function App() {
     saveStatus,
     loadError,
     clearTree,
+    retryLoad,
   } = useLineageStore(user?.id);
 
   const [activeTab, setActiveTab] = useState<'tree' | 'index' | 'timeline' | 'analytics' | 'map'>('tree');
@@ -64,6 +68,25 @@ export default function App() {
     memberId: string;
     type: 'father' | 'mother' | 'spouse' | 'child';
   } | null>(null);
+
+  const onboardingKey = user ? `kin_onboarding_dismissed_${user.id}` : '';
+  const [onboardingDismissed, setOnboardingDismissed] = useState(false);
+
+  useEffect(() => {
+    if (user?.id) {
+      setOnboardingDismissed(
+        localStorage.getItem(`kin_onboarding_dismissed_${user.id}`) === 'true'
+      );
+    }
+  }, [user?.id]);
+
+  const dismissOnboarding = () => {
+    if (onboardingKey) localStorage.setItem(onboardingKey, 'true');
+    setOnboardingDismissed(true);
+  };
+
+  const showOnboarding =
+    members.length === 0 && !showForm && !onboardingDismissed && activeTab === 'tree';
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -147,6 +170,7 @@ export default function App() {
     setShowForm(false);
     setEditMemberId(null);
     setPrefillRelation(null);
+    if (members.length === 0) dismissOnboarding();
   };
 
   const handleDeleteMember = (targetId: string) => {
@@ -188,7 +212,7 @@ export default function App() {
       downloadAnchor.remove();
     } catch (err) {
       console.error('Export fail:', err);
-      alert('Failed to export family tree.');
+      toast('Failed to export family tree.', 'error');
     }
   };
 
@@ -203,13 +227,14 @@ export default function App() {
         if (Array.isArray(parsed) && parsed.length > 0 && parsed[0].id) {
           setMembers(synchronizeAllRelationships(parsed));
           setFocusId(parsed[0].id);
-          alert(`Successfully imported ${parsed.length} family records.`);
+          toast(`Successfully imported ${parsed.length} family records.`, 'success');
+          dismissOnboarding();
         } else {
-          alert('Invalid file format. Ensure it is a valid list of family member records.');
+          toast('Invalid file format. Ensure it is a valid list of family member records.', 'error');
         }
       } catch (err) {
         console.error('Import process crash:', err);
-        alert('Could not parse JSON structure.');
+        toast('Could not parse JSON structure.', 'error');
       }
     };
     reader.readAsText(file);
@@ -217,11 +242,10 @@ export default function App() {
   };
 
   const handleClearTree = async () => {
-    if (
-      confirm(
-        'Are you absolutely sure you want to completely clear this lineage chart? Your data will be permanently removed from the cloud.'
-      )
-    ) {
+    const ok = await confirm(
+      'Are you absolutely sure you want to completely clear this lineage chart? Your data will be permanently removed from the cloud.'
+    );
+    if (ok) {
       await clearTree();
       setShowForm(false);
     }
@@ -281,8 +305,8 @@ export default function App() {
           <p className="text-sm text-[#2D2926] font-semibold">Failed to load your archive</p>
           <p className="text-xs text-[#7A7570]">{loadError}</p>
           <button
-            onClick={() => window.location.reload()}
-            className="px-4 py-2 bg-[#2D2926] text-white rounded-lg text-xs font-bold"
+            onClick={retryLoad}
+            className="px-4 py-2 bg-[#2D2926] text-white rounded-lg text-xs font-bold cursor-pointer"
           >
             Retry
           </button>
@@ -313,6 +337,11 @@ export default function App() {
               <p className="text-[10px] text-[#7A7570] font-medium font-mono uppercase tracking-wider">
                 Lineage Registry Archive
               </p>
+              {user.email && (
+                <p className="text-[10px] text-[#A8A29E] truncate max-w-[180px]" title={user.email}>
+                  {user.email}
+                </p>
+              )}
             </div>
           </div>
 
@@ -473,6 +502,27 @@ export default function App() {
                   }}
                 />
               </motion.div>
+            ) : showOnboarding ? (
+              <OnboardingWizard
+                onAddYourself={() => {
+                  dismissOnboarding();
+                  handleCreateNewMemberRequest();
+                }}
+                onAddParent={() => {
+                  if (members.length === 0) {
+                    toast('Add yourself first, then you can link parents.', 'info');
+                    handleCreateNewMemberRequest();
+                    return;
+                  }
+                  dismissOnboarding();
+                  handleAddRelativeRequest(members[0].id, 'father');
+                }}
+                onImport={() => {
+                  dismissOnboarding();
+                  fileInputRef.current?.click();
+                }}
+                onDismiss={dismissOnboarding}
+              />
             ) : (
               <div>
                 {activeTab === 'tree' && (
@@ -483,6 +533,7 @@ export default function App() {
                     onLayoutChange={updateBlueprintLayout}
                     onSelectFocus={handleSelectMemberFocus}
                     onAddRelativeRequest={handleAddRelativeRequest}
+                    onRegisterFirst={handleCreateNewMemberRequest}
                   />
                 )}
                 {activeTab === 'index' && (

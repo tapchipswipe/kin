@@ -3,21 +3,27 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { createClient } from '@supabase/supabase-js';
+import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import { getSupabaseAnonKey, getSupabaseUrl, isSupabaseConfigured } from './supabaseConfig';
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+let client: SupabaseClient | null = null;
 
-if (!supabaseUrl || !supabaseAnonKey) {
-  console.warn(
-    'Supabase env vars missing. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.'
-  );
+export function getSupabase(): SupabaseClient {
+  if (!isSupabaseConfigured()) {
+    throw new Error('Supabase is not configured');
+  }
+  if (!client) {
+    client = createClient(getSupabaseUrl()!, getSupabaseAnonKey()!);
+  }
+  return client;
 }
 
-export const supabase = createClient(
-  supabaseUrl ?? '',
-  supabaseAnonKey ?? ''
-);
+/** @deprecated Use getSupabase() — kept for existing imports */
+export const supabase = new Proxy({} as SupabaseClient, {
+  get(_target, prop) {
+    return Reflect.get(getSupabase(), prop);
+  },
+});
 
 export type Database = {
   public: {

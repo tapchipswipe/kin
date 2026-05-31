@@ -24,6 +24,7 @@ export function useLineageStore(userId: string | undefined) {
   const [geocodeCache, setGeocodeCache] = useState<Record<string, { lat: number; lng: number }>>({});
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
 
   const membersSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const prefsSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -62,14 +63,26 @@ export function useLineageStore(userId: string | undefined) {
       .catch((err) => {
         if (cancelled) return;
         console.error('Failed to load lineage data:', err);
-        setLoadError(err instanceof Error ? err.message : 'Failed to load data');
+        const message =
+          err instanceof Error
+            ? err.message
+            : err && typeof err === 'object' && 'message' in err
+              ? String((err as { message: string }).message)
+              : 'Failed to load data';
+        setLoadError(message);
         setSaveStatus('error');
       });
 
     return () => {
       cancelled = true;
     };
-  }, [userId]);
+  }, [userId, reloadKey]);
+
+  const retryLoad = useCallback(() => {
+    setLoadError(null);
+    setSaveStatus('loading');
+    setReloadKey((k) => k + 1);
+  }, []);
 
   useEffect(() => {
     if (!treeId || skipMembersSave.current) {
@@ -165,5 +178,6 @@ export function useLineageStore(userId: string | undefined) {
     saveStatus,
     loadError,
     clearTree,
+    retryLoad,
   };
 }

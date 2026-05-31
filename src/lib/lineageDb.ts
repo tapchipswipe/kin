@@ -8,6 +8,36 @@ import { supabase } from './supabase';
 
 export type TreeLayout = 'hierarchical' | 'radial' | 'grid';
 
+function getSupabaseErrorMessage(error: unknown): string {
+  if (error && typeof error === 'object' && 'message' in error) {
+    const message = String((error as { message: string }).message);
+    if (message.includes('Could not find the table') || message.includes('schema cache')) {
+      return 'Database tables are missing. Run the Supabase migration in supabase/migrations/20260531120000_initial_schema.sql.';
+    }
+    if (message.includes('violates foreign key constraint') && message.includes('profiles')) {
+      return 'Your user profile is missing in the database. Retrying setup should fix this — refresh the page.';
+    }
+    return message;
+  }
+  if (error instanceof Error) return error.message;
+  return 'Failed to load data';
+}
+
+/** Ensures profile exists (needed for users who signed up before the DB trigger was applied). */
+async function ensureProfile(userId: string): Promise<void> {
+  const { data, error: selectError } = await supabase
+    .from('profiles')
+    .select('id')
+    .eq('id', userId)
+    .maybeSingle();
+
+  if (selectError) throw selectError;
+  if (data) return;
+
+  const { error: insertError } = await supabase.from('profiles').insert({ id: userId });
+  if (insertError) throw insertError;
+}
+
 export interface LineageData {
   treeId: string;
   members: FamilyMember[];
@@ -17,6 +47,12 @@ export interface LineageData {
 }
 
 export async function loadLineageData(userId: string): Promise<LineageData> {
+  try {
+    await ensureProfile(userId);
+  } catch (error) {
+    throw new Error(getSupabaseErrorMessage(error));
+  }
+
   const { data: tree, error: treeError } = await supabase
     .from('trees')
     .select('id')
@@ -25,7 +61,7 @@ export async function loadLineageData(userId: string): Promise<LineageData> {
     .limit(1)
     .maybeSingle();
 
-  if (treeError) throw treeError;
+  if (treeError) throw new Error(getSupabaseErrorMessage(treeError));
 
   let treeId = tree?.id;
 
@@ -36,7 +72,7 @@ export async function loadLineageData(userId: string): Promise<LineageData> {
       .select('id')
       .single();
 
-    if (createError) throw createError;
+    if (createError) throw new Error(getSupabaseErrorMessage(createError));
     treeId = newTree.id;
   }
 
@@ -45,8 +81,8 @@ export async function loadLineageData(userId: string): Promise<LineageData> {
     supabase.from('user_preferences').select('*').eq('user_id', userId).maybeSingle(),
   ]);
 
-  if (membersResult.error) throw membersResult.error;
-  if (prefsResult.error) throw prefsResult.error;
+  if (membersResult.error) throw new Error(getSupabaseErrorMessage(membersResult.error));
+  if (prefsResult.error) throw new Error(getSupabaseErrorMessage(prefsResult.error));
 
   const members = (membersResult.data ?? []).map(
     (row) => row.data as FamilyMember
@@ -60,7 +96,7 @@ export async function loadLineageData(userId: string): Promise<LineageData> {
       .select('*')
       .single();
 
-    if (prefsCreateError) throw prefsCreateError;
+    if (prefsCreateError) throw new Error(getSupabaseErrorMessage(prefsCreateError));
     prefs = newPrefs;
   }
 
